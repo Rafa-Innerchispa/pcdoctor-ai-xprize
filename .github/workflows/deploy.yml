@@ -52,9 +52,10 @@ jobs:
             --region "${{ vars.GCP_REGION }}" \
             --service-account "${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}" \
             --allow-unauthenticated \
-            --set-env-vars "NODE_ENV=production,DEMO_MODE=false,OUTBOUND_ENABLED=false,INVOICING_ENABLED=false,EVENT_STORE=firestore,GOOGLE_CLOUD_PROJECT=${{ vars.GCP_PROJECT_ID }},GOOGLE_CLOUD_LOCATION=global,GEMINI_MODEL=gemini-2.5-flash" \
+            --set-env-vars "NODE_ENV=production,DEMO_MODE=false,OUTBOUND_ENABLED=false,INVOICING_ENABLED=false,EVENT_STORE=firestore,GOOGLE_CLOUD_PROJECT=${{ vars.GCP_PROJECT_ID }},GOOGLE_CLOUD_LOCATION=global,GEMINI_MODEL=gemini-2.5-flash,FIRESTORE_DATABASE=(default)" \
             --set-secrets "API_ADMIN_KEY=fieldspark-api-admin-key:latest" \
-            --max-instances 4 \
+            --min-instances 0 \
+            --max-instances 2 \
             --memory 512Mi \
             --cpu 1
 
@@ -69,9 +70,23 @@ jobs:
             --region "${{ vars.GCP_REGION }}" \
             --service-account "${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}" \
             --allow-unauthenticated \
-            --max-instances 4 \
+            --min-instances 0 \
+            --max-instances 2 \
             --memory 512Mi \
             --cpu 1
+
+      - name: Restrict API browser origin to the deployed web app
+        run: |
+          WEB_URL="$(gcloud run services describe fieldspark-web \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION }}" \
+            --format='value(status.url)')"
+          gcloud run services update fieldspark-api \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION }}" \
+            --update-env-vars "WEB_ORIGIN=$WEB_URL" \
+            --min-instances 0 \
+            --max-instances 2
 
       - name: Report revisions
         run: |
