@@ -57,6 +57,7 @@ Repository variables:
 - `GCP_REGION`
 - `GCP_WORKLOAD_IDENTITY_PROVIDER`
 - `GCP_DEPLOY_SERVICE_ACCOUNT`
+- `GCP_RUNTIME_SERVICE_ACCOUNT`
 
 The manual workflow builds immutable images in Artifact Registry and deploys
 them to Cloud Run.
@@ -82,13 +83,26 @@ Verify:
 
 Export a redacted record and register it in the evidence manifest.
 
-## 7. Promotion
+## 7. Seed synthetic contacts
+
+Use the admin key in memory and call the idempotent seed endpoint:
+
+```bash
+curl -X POST "$API_URL/v1/demo/contacts/seed" -H "x-admin-key: $API_ADMIN_KEY"
+curl "$API_URL/v1/demo/contacts/seed-status" -H "x-admin-key: $API_ADMIN_KEY"
+```
+
+Expected result: 20 stored contacts, split 10/10 between the studio and IAPRO,
+with `synthetic=true` and `outboundAllowed=false`. The Excel-compatible fixture
+is available from `GET /v1/demo/contacts.csv`.
+
+## 8. Promotion
 
 Staging remains outbound-blocked. Production starts in shadow mode. Enabling
 WhatsApp or invoicing requires a separate approved change, idempotency tests,
 rollback procedure, customer consent, and monitoring.
 
-## 8. Rollback
+## 9. Rollback
 
 Cloud Run revisions are immutable. Route traffic to the last known-good revision
 and set safety flags to false. Do not delete failed-revision logs; preserve them

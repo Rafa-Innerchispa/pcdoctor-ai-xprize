@@ -6,10 +6,10 @@ FieldSpark AI is the product of **PC Doctor AI**, a new business unit operated b
 PC Doctor, Ecuador. It is being built for the Build with Gemini XPRIZE 2026 and
 uses Gemini on Vertex AI plus Google Cloud.
 
-> Current state: foundation release. The repository contains a working demo,
-> deployable services, auditable agent events, infrastructure as code, and an
-> evidence plan. It does **not** claim production revenue, real Gemini usage, or
-> customer activity until those events are captured and verified.
+> Current state: deployed staging foundation. The repository contains a working
+> demo, auditable agent events, infrastructure as code, 20 synthetic test
+> contacts, and verified evidence of a real Gemini staging call. It does **not**
+> claim production revenue or real customer activity.
 
 ## What the product does
 
@@ -57,13 +57,27 @@ npm run dev
 
 - Web: `http://localhost:3000`
 - API: `http://localhost:8080`
-- Health: `http://localhost:8080/healthz`
+- Health: `http://localhost:8080/health`
 
 The default is safe demo mode. It uses synthetic records, blocks outbound
 messages, blocks invoicing, and does not call Gemini.
 
 Copy `.env.example` values into your local environment only when needed. Never
 commit credentials.
+
+## Test contacts
+
+The versioned seed contains 10 photography-studio contacts and 10 IAPRO
+contacts. Every record is visibly synthetic, uses an `example.invalid` email,
+has an unroutable test phone, and sets `outboundAllowed=false`.
+
+- `GET /v1/demo/contacts` — JSON list; filter with `tenantId` or `playbook`.
+- `GET /v1/demo/contacts.csv` — Excel-compatible export.
+- `POST /v1/demo/contacts/seed` — idempotent Firestore seed; admin key required.
+- `GET /v1/demo/contacts/seed-status` — persisted counts; admin key required.
+
+These records may exercise import, segmentation, follow-up, approval, and
+billing-review flows. They must never be represented as real customers.
 
 ## Verify
 

@@ -4,7 +4,8 @@ export const overview = {
   generatedAt: "2026-07-29T00:00:00.000Z",
   synthetic: true,
   metrics: {
-    contacts: 2000,
+    contacts: 20,
+    estimatedPilotContacts: 2000,
     activeOpportunities: 38,
     continuityCoverage: 87,
     agentDecisions: 142,

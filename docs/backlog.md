@@ -4,6 +4,7 @@
 
 - [x] repository and source-of-truth package
 - [x] polished synthetic dashboard
+- [x] 20 unroutable synthetic contacts, CSV export, and Firestore seed
 - [x] API, safe demo mode, audit schema, Gemini adapter
 - [x] infrastructure and CI/CD blueprints
 - [ ] make repository private or explicitly accept public exposure

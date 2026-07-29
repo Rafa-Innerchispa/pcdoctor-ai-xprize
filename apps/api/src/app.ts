@@ -4,10 +4,14 @@ import rateLimit from "@fastify/rate-limit";
 import {
   analyzeCaseRequestSchema,
   auditEventSchema,
+  syntheticContacts,
   type AnalyzeCaseRequest,
   type AuditEvent,
+  type SyntheticContact,
 } from "@fieldspark/contracts";
 import Fastify, { type FastifyRequest } from "fastify";
+import { contactsToCsv } from "./contact-csv.js";
+import { createContactStore } from "./contact-store.js";
 import { loadConfig, type AppConfig } from "./config.js";
 import { buildDemoAnalysis, overview } from "./demo.js";
 import { createEventStore } from "./event-store.js";
@@ -41,6 +45,7 @@ export async function buildApp(
     requestIdHeader: "x-request-id",
   });
   const eventStore = createEventStore(config);
+  const contactStore = createContactStore(config);
   const gemini = new GeminiService(config);
 
   await app.register(cors, {
@@ -61,6 +66,106 @@ export async function buildApp(
   app.get("/healthz", healthResponse);
 
   app.get("/v1/demo/overview", async () => overview);
+
+  function filterSyntheticContacts(
+    request: FastifyRequest,
+  ): readonly SyntheticContact[] {
+    const query =
+      typeof request.query === "object" && request.query ? request.query : {};
+    const tenantId =
+      "tenantId" in query && typeof query.tenantId === "string"
+        ? query.tenantId
+        : undefined;
+    const playbook =
+      "playbook" in query && typeof query.playbook === "string"
+        ? query.playbook
+        : undefined;
+    return syntheticContacts.filter(
+      (contact) =>
+        (!tenantId || contact.tenantId === tenantId) &&
+        (!playbook || contact.playbook === playbook),
+    );
+  }
+
+  app.get("/v1/demo/contacts", async (request) => {
+    const contacts = filterSyntheticContacts(request);
+    return {
+      synthetic: true,
+      outboundAllowed: false,
+      total: contacts.length,
+      contacts,
+    };
+  });
+
+  app.get("/v1/demo/contacts.csv", async (request, reply) => {
+    const contacts = filterSyntheticContacts(request);
+    return reply
+      .header("content-type", "text/csv; charset=utf-8")
+      .header(
+        "content-disposition",
+        'attachment; filename="fieldspark-synthetic-contacts.csv"',
+      )
+      .send(contactsToCsv(contacts));
+  });
+
+  app.get("/v1/demo/contacts/seed-status", async (request, reply) => {
+    if (!requireAdmin(request, config)) {
+      return reply.code(401).send({ error: "admin_key_required" });
+    }
+    const stored = await contactStore.list();
+    return {
+      synthetic: true,
+      outboundAllowed: false,
+      stored: stored.length,
+      tenants: {
+        studio: stored.filter((contact) => contact.tenantId === "studio-demo")
+          .length,
+        iapro: stored.filter((contact) => contact.tenantId === "iapro-demo")
+          .length,
+      },
+    };
+  });
+
+  app.post("/v1/demo/contacts/seed", async (request, reply) => {
+    if (!requireAdmin(request, config)) {
+      return reply.code(401).send({ error: "admin_key_required" });
+    }
+    const startedAt = Date.now();
+    const stored = await contactStore.upsertMany(syntheticContacts);
+    const event: AuditEvent = auditEventSchema.parse({
+      timestamp: new Date().toISOString(),
+      eventId: randomUUID(),
+      eventName: "contact_import_completed",
+      tenantId: "synthetic-seed",
+      customerId: null,
+      caseId: null,
+      agentId: "seed-agent-v1",
+      actorType: "system",
+      action: "seed_synthetic_contacts",
+      inputSummary: `${syntheticContacts.length} synthetic contacts from the versioned seed`,
+      decision: "Persist test-only contacts with outbound delivery blocked",
+      result: `${stored} synthetic contacts available in the contact store`,
+      model: null,
+      requestReference: null,
+      inputTokens: null,
+      outputTokens: null,
+      estimatedCostUsd: null,
+      humanApproval: "not_required",
+      durationMs: Date.now() - startedAt,
+      status: "completed",
+      error: null,
+      evidenceVersion: "1.0",
+    });
+    await eventStore.append(event);
+    return {
+      synthetic: true,
+      seeded: syntheticContacts.length,
+      stored,
+      outboundAllowed: false,
+      tenants: { studio: 10, iapro: 10 },
+      event,
+    };
+  });
 
   app.get("/v1/events", async (request, reply) => {
     if (!requireAdmin(request, config)) {
