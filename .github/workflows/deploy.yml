@@ -92,3 +92,16 @@ jobs:
         run: |
           gcloud run services describe fieldspark-api --region "${{ vars.GCP_REGION }}" --format="value(status.url,status.latestReadyRevisionName)"
           gcloud run services describe fieldspark-web --region "${{ vars.GCP_REGION }}" --format="value(status.url,status.latestReadyRevisionName)"
+
+      - name: Verify public service health
+        run: |
+          API_URL="$(gcloud run services describe fieldspark-api \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION }}" \
+            --format='value(status.url)')"
+          WEB_URL="$(gcloud run services describe fieldspark-web \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION }}" \
+            --format='value(status.url)')"
+          curl --fail --show-error --silent "$API_URL/health"
+          curl --fail --show-error --silent "$WEB_URL/" >/dev/null

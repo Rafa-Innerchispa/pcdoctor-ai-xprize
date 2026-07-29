@@ -11,7 +11,7 @@ describe("FieldSpark API", () => {
   it("reports safe defaults", async () => {
     const app = await buildApp({ NODE_ENV: "test" });
     apps.push(app);
-    const response = await app.inject({ method: "GET", url: "/healthz" });
+    const response = await app.inject({ method: "GET", url: "/health" });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
       status: "ok",
@@ -19,6 +19,12 @@ describe("FieldSpark API", () => {
       outboundEnabled: false,
       invoicingEnabled: false,
     });
+
+    const compatibilityResponse = await app.inject({
+      method: "GET",
+      url: "/healthz",
+    });
+    expect(compatibilityResponse.statusCode).toBe(200);
   });
 
   it("produces a deterministic and redacted demo decision", async () => {

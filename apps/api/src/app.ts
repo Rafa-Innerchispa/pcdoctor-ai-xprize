@@ -49,13 +49,16 @@ export async function buildApp(
   });
   await app.register(rateLimit, { max: 100, timeWindow: "1 minute" });
 
-  app.get("/healthz", async () => ({
+  const healthResponse = async () => ({
     status: "ok",
     service: "fieldspark-api",
     demoMode: config.DEMO_MODE,
     outboundEnabled: config.OUTBOUND_ENABLED,
     invoicingEnabled: config.INVOICING_ENABLED,
-  }));
+  });
+
+  app.get("/health", healthResponse);
+  app.get("/healthz", healthResponse);
 
   app.get("/v1/demo/overview", async () => overview);
 
