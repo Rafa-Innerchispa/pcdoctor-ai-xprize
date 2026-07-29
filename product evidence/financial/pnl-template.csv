@@ -1,0 +1,5 @@
+month,revenue_implementation,revenue_subscription,revenue_usage,total_revenue,cogs_gcp,cogs_vertex_ai,cogs_whatsapp,cogs_third_party,cogs_direct_labor,total_cogs,gross_profit,operating_expenses,net_income,evidence_ids,notes
+2026-05,0,0,0,0,0,0,0,0,0,0,0,0,0,,No FieldSpark revenue
+2026-06,0,0,0,0,0,0,0,0,0,0,0,0,0,,No FieldSpark revenue
+2026-07,0,0,0,0,0,0,0,0,0,0,0,0,0,,Replace only with verified transactions
+2026-08,0,0,0,0,0,0,0,0,0,0,0,0,0,,Partial month through submission cutoff

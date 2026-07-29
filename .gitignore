@@ -1,0 +1,39 @@
+node_modules/
+.next/
+dist/
+coverage/
+.turbo/
+.cache/
+*.log
+*.tsbuildinfo
+.DS_Store
+Thumbs.db
+
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+*.pem
+*.key
+*.p12
+*.pfx
+service-account*.json
+application_default_credentials.json
+
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+
+product evidence/private/*
+!product evidence/private/README.md
+product evidence/raw/*
+!product evidence/raw/README.md
+
+evolution_sessions/
+postgres_data/
+redis_data/
