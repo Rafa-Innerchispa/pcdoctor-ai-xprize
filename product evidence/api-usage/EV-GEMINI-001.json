@@ -1,0 +1,45 @@
+{
+  "evidenceId": "EV-GEMINI-001",
+  "capturedAtUtc": "2026-07-29T12:35:35.751Z",
+  "environment": "gcp-staging",
+  "projectId": "pcdoctor-ai-xprize-2026",
+  "region": "us-central1",
+  "service": "fieldspark-api",
+  "deploymentRevision": "fieldspark-api-00005-7tb",
+  "sourceCommit": "c2c9f3b9ba5ffc0f29feb14bc57443f0ed4e239a",
+  "deploymentRun": "https://github.com/Rafa-Innerchispa/pcdoctor-ai-xprize/actions/runs/30451923534",
+  "inputDataClassification": "synthetic verification prompt; no customer data",
+  "geminiCallReal": true,
+  "response": {
+    "synthetic": false,
+    "summary": "Small service company needs to document its maintenance process.",
+    "nextBestAction": "Initiate discovery call to gather more details on current process, goals, and scope.",
+    "confidence": 1,
+    "requiresHumanApproval": true
+  },
+  "usage": {
+    "model": "gemini-2.5-flash",
+    "requestReference": "k_NpapTOBt2gmecPh5XdgA4",
+    "inputTokens": 117,
+    "outputTokens": 274,
+    "durationMs": 4914
+  },
+  "audit": {
+    "eventId": "94f2ed49-38c8-4840-b941-993db04c720b",
+    "eventName": "gemini_analysis_completed",
+    "status": "completed",
+    "firestoreMatchCount": 1,
+    "cloudLoggingMatchCount": 1
+  },
+  "safetyState": {
+    "demoMode": false,
+    "outboundEnabled": false,
+    "invoicingEnabled": false,
+    "humanApproval": "required"
+  },
+  "redaction": {
+    "credentialsIncluded": false,
+    "customerDataIncluded": false,
+    "privatePromptIncluded": false
+  }
+}
