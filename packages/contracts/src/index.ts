@@ -1,7 +1,10 @@
 import { z } from "zod";
 
+export * from "./synthetic-contacts.js";
+
 export const eventNames = [
   "customer_created",
+  "contact_import_completed",
   "case_created",
   "media_received",
   "gemini_analysis_completed",

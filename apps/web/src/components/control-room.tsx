@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { syntheticContacts } from "@fieldspark/contracts";
+import { useEffect, useMemo, useState } from "react";
 import {
   ApprovalIcon,
   ArrowIcon,
@@ -19,13 +20,7 @@ const playbooks = {
     title: "Cada conversación merece una siguiente acción.",
     description:
       "FieldSpark mantiene vivos los vínculos del estudio, encuentra oportunidades dormidas y prepara el trabajo facturable sin perder la sensibilidad humana.",
-    contact: "María P.",
-    caseName: "Sesión familiar · Agosto",
-    service: "Retrato familiar",
-    channel: "WhatsApp",
-    amount: "$185",
     confidence: "91%",
-    next: "Solicitar fecha y número de participantes",
     agents: [
       ["Intake", "Clasificó intención", "12 s"],
       ["Continuity", "Detectó seguimiento vencido", "1 min"],
@@ -37,13 +32,7 @@ const playbooks = {
     title: "De una solicitud difusa a un alcance defendible.",
     description:
       "FieldSpark clasifica la necesidad entre 18 líneas de servicio, formula las preguntas faltantes y entrega a IAPRO una oportunidad lista para revisión.",
-    contact: "Operaciones Andina",
-    caseName: "Optimización de mantenimiento",
-    service: "Ingeniería de procesos",
-    channel: "Formulario",
-    amount: "$640",
     confidence: "88%",
-    next: "Enviar cuestionario de diagnóstico",
     agents: [
       ["Intake", "Extrajo problema operativo", "9 s"],
       ["Scoping", "Generó diagnóstico inicial", "34 s"],
@@ -52,19 +41,37 @@ const playbooks = {
   },
 } as const;
 
-const contacts: ReadonlyArray<
-  readonly [string, string, string, string, "Alta" | "Media"]
-> = [
-  ["Ana C.", "Sesión maternidad", "Seguimiento hoy", "$240", "Alta"],
-  ["Estudio Norte", "Video corporativo", "Esperando material", "$780", "Media"],
-  ["Daniela V.", "Álbum pendiente", "Listo para facturar", "$115", "Alta"],
-  ["Grupo Altura", "Evento empresarial", "Aprobación humana", "$1.250", "Media"],
-];
+const money = new Intl.NumberFormat("es-EC", {
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 0,
+});
+
+const priorityLabel = {
+  high: "Alta",
+  medium: "Media",
+  low: "Baja",
+} as const;
+
+const totalPipelineUsd = syntheticContacts.reduce(
+  (total, contact) => total + contact.estimatedValueUsd,
+  0,
+);
 
 export function ControlRoom() {
   const [active, setActive] = useState<PlaybookKey>("studio");
   const [selectedContact, setSelectedContact] = useState(0);
   const content = playbooks[active];
+  const activeContacts = useMemo(
+    () =>
+      syntheticContacts.filter((contact) =>
+        active === "studio"
+          ? contact.playbook === "photography_studio"
+          : contact.playbook === "iapro",
+      ),
+    [active],
+  );
+  const selected = activeContacts[selectedContact] ?? activeContacts[0];
   const nowLabel = useMemo(
     () =>
       new Intl.DateTimeFormat("es-EC", {
@@ -75,6 +82,14 @@ export function ControlRoom() {
       }).format(new Date()),
     [],
   );
+
+  useEffect(() => {
+    setSelectedContact(0);
+  }, [active]);
+
+  if (!selected) {
+    return null;
+  }
 
   return (
     <main className="app-shell">
@@ -142,8 +157,8 @@ export function ControlRoom() {
           </section>
 
           <section className="metrics" aria-label="Métricas de demostración">
-            <article><small>Contactos preparados</small><strong>2.000</strong><span className="trend">Base estimada del piloto</span></article>
-            <article><small>Pipeline asistido</small><strong>$6.840</strong><span className="trend">↑ 18% esta semana</span></article>
+            <article><small>Contactos de prueba</small><strong>{syntheticContacts.length}</strong><span className="trend">10 Estudio · 10 IAPRO</span></article>
+            <article><small>Pipeline sintético</small><strong>{money.format(totalPipelineUsd)}</strong><span className="trend">Sin valor comercial real</span></article>
             <article><small>Decisiones de agentes</small><strong>142</strong><span>100% auditadas</span></article>
             <article><small>Revisión humana</small><strong>3</strong><span className="attention">Requieren atención</span></article>
           </section>
@@ -151,17 +166,17 @@ export function ControlRoom() {
           <section className="dashboard-grid">
             <article className="panel focus-panel">
               <div className="panel-heading">
-                <div><small>CASO EN FOCO</small><h2>{content.caseName}</h2></div>
+                <div><small>CASO EN FOCO · SINTÉTICO</small><h2>{selected.opportunity}</h2></div>
                 <button type="button">Abrir caso <ArrowIcon /></button>
               </div>
               <div className="case-person">
-                <span className="avatar">{content.contact.slice(0, 2).toUpperCase()}</span>
-                <div><strong>{content.contact}</strong><small>{content.channel} · {content.service}</small></div>
-                <div className="case-value"><small>VALOR POTENCIAL</small><strong>{content.amount}</strong></div>
+                <span className="avatar">{selected.displayName.slice(0, 2).toUpperCase()}</span>
+                <div><strong>{selected.displayName}</strong><small>{selected.channel} · {selected.accountName}</small></div>
+                <div className="case-value"><small>VALOR DE PRUEBA</small><strong>{money.format(selected.estimatedValueUsd)}</strong></div>
               </div>
               <div className="decision-card">
                 <div className="decision-top"><span><SparkIcon />Decisión sugerida</span><small>{content.confidence} confianza</small></div>
-                <p>{content.next}</p>
+                <p>{selected.nextAction}</p>
                 <div className="approval-row">
                   <span>Requiere revisión humana antes del envío</span>
                   <div><button type="button" className="ghost">Editar</button><button type="button" className="approve">Aprobar</button></div>
@@ -191,22 +206,22 @@ export function ControlRoom() {
 
             <article className="panel contacts-panel" id="customers">
               <div className="panel-heading">
-                <div><small>CONTINUIDAD</small><h2>Oportunidades que no deben enfriarse</h2></div>
-                <button type="button">Ver todas <ArrowIcon /></button>
+                <div><small>CONTINUIDAD · DATOS SINTÉTICOS</small><h2>{activeContacts.length} contactos listos para probar</h2></div>
+                <span className="synthetic">Envíos bloqueados</span>
               </div>
               <div className="contact-table">
-                {contacts.map((contact, index) => (
+                {activeContacts.map((contact, index) => (
                   <button
                     type="button"
                     className={selectedContact === index ? "contact-row selected" : "contact-row"}
                     onClick={() => setSelectedContact(index)}
-                    key={contact[0]}
+                    key={contact.id}
                   >
-                    <span className="mini-avatar">{contact[0].slice(0, 2).toUpperCase()}</span>
-                    <span><strong>{contact[0]}</strong><small>{contact[1]}</small></span>
-                    <span><small>SIGUIENTE ACCIÓN</small><strong>{contact[2]}</strong></span>
-                    <span><small>VALOR</small><strong>{contact[3]}</strong></span>
-                    <span className={`priority ${contact[4].toLowerCase()}`}>{contact[4]}</span>
+                    <span className="mini-avatar">{contact.displayName.slice(0, 2).toUpperCase()}</span>
+                    <span><strong>{contact.displayName}</strong><small>{contact.opportunity}</small></span>
+                    <span><small>SIGUIENTE ACCIÓN</small><strong>{contact.nextAction}</strong></span>
+                    <span><small>VALOR DE PRUEBA</small><strong>{money.format(contact.estimatedValueUsd)}</strong></span>
+                    <span className={`priority ${priorityLabel[contact.priority].toLowerCase()}`}>{priorityLabel[contact.priority]}</span>
                   </button>
                 ))}
               </div>

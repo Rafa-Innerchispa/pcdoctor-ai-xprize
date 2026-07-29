@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@fieldspark/contracts": "0.1.0",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
