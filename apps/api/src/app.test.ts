@@ -133,6 +133,85 @@ describe("FieldSpark API", () => {
     });
   });
 
+  it("runs a bounded synthetic workflow without outbound or invoicing", async () => {
+    const app = await buildApp({ NODE_ENV: "test" });
+    apps.push(app);
+
+    const initial = await app.inject({
+      method: "GET",
+      url: "/v1/demo/workflows/studio-test-001",
+    });
+    expect(initial.statusCode).toBe(200);
+    expect(initial.json().workflow.status).toBe("new");
+
+    const analyzed = await app.inject({
+      method: "POST",
+      url: "/v1/demo/workflows/studio-test-001/analyze",
+    });
+    expect(analyzed.statusCode).toBe(200);
+    expect(analyzed.json()).toMatchObject({
+      synthetic: true,
+      outboundAllowed: false,
+      invoiceIssued: false,
+      workflow: {
+        status: "awaiting_approval",
+        approvalStatus: "pending",
+      },
+    });
+
+    const edited = await app.inject({
+      method: "POST",
+      url: "/v1/demo/workflows/studio-test-001/draft",
+      payload: {
+        draftReply:
+          "Borrador sintético editado y listo para revisión antes de cualquier envío.",
+      },
+    });
+    expect(edited.statusCode).toBe(200);
+    expect(edited.json().workflow.draftReply).toContain("editado");
+
+    const approved = await app.inject({
+      method: "POST",
+      url: "/v1/demo/workflows/studio-test-001/approve",
+    });
+    expect(approved.statusCode).toBe(200);
+    expect(approved.json()).toMatchObject({
+      outboundAllowed: false,
+      workflow: { status: "approved", approvalStatus: "approved" },
+    });
+
+    const billing = await app.inject({
+      method: "POST",
+      url: "/v1/demo/workflows/studio-test-001/billing-review",
+    });
+    expect(billing.statusCode).toBe(200);
+    expect(billing.json()).toMatchObject({
+      invoiceIssued: false,
+      workflow: {
+        status: "billing_review",
+        billingStatus: "ready_for_review",
+      },
+    });
+  });
+
+  it("rejects unknown contacts and prevents billing without approval", async () => {
+    const app = await buildApp({ NODE_ENV: "test" });
+    apps.push(app);
+
+    const unknown = await app.inject({
+      method: "POST",
+      url: "/v1/demo/workflows/not-a-contact/analyze",
+    });
+    expect(unknown.statusCode).toBe(404);
+
+    const prematureBilling = await app.inject({
+      method: "POST",
+      url: "/v1/demo/workflows/iapro-test-001/billing-review",
+    });
+    expect(prematureBilling.statusCode).toBe(409);
+    expect(prematureBilling.json().error).toBe("approval_required");
+  });
+
   it("blocks real Gemini verification while demo mode is enabled", async () => {
     const app = await buildApp({ NODE_ENV: "test" });
     apps.push(app);
