@@ -157,6 +157,7 @@ export async function buildApp(
       evidenceVersion: "1.0",
     });
     await eventStore.append(event);
+    request.log.info({ auditEvent: event }, "synthetic contact seed completed");
     return {
       synthetic: true,
       seeded: syntheticContacts.length,
