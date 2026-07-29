@@ -36,8 +36,14 @@ jobs:
           REGISTRY: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/fieldspark
           SHA: ${{ github.sha }}
         run: |
+          API_URL="$(gcloud run services describe fieldspark-api \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION }}" \
+            --format='value(status.url)')"
           docker build -f apps/api/Dockerfile -t "$REGISTRY/api:$SHA" .
-          docker build -f apps/web/Dockerfile -t "$REGISTRY/web:$SHA" .
+          docker build -f apps/web/Dockerfile \
+            --build-arg "VITE_API_URL=$API_URL" \
+            -t "$REGISTRY/web:$SHA" .
           docker push "$REGISTRY/api:$SHA"
           docker push "$REGISTRY/web:$SHA"
 

@@ -23,6 +23,7 @@ export const eventNames = [
   "service_completed",
   "delivery_report_generated",
   "invoice_created",
+  "billing_item_prepared",
   "payment_received",
   "agent_error",
   "agent_retry",
@@ -83,3 +84,34 @@ export const caseAnalysisSchema = z.object({
 });
 
 export type CaseAnalysis = z.infer<typeof caseAnalysisSchema>;
+
+export const demoWorkflowStatuses = [
+  "new",
+  "awaiting_approval",
+  "approved",
+  "rejected",
+  "billing_review",
+] as const;
+
+export const demoWorkflowSchema = z.object({
+  id: z.string().min(3).max(100),
+  contactId: z.string().min(3).max(80),
+  tenantId: z.enum(["studio-demo", "iapro-demo"]),
+  playbook: z.enum(["photography_studio", "iapro"]),
+  status: z.enum(demoWorkflowStatuses),
+  synthetic: z.literal(true),
+  outboundAllowed: z.literal(false),
+  invoiceIssued: z.literal(false),
+  approvalStatus: z.enum(["not_requested", "pending", "approved", "rejected"]),
+  billingStatus: z.enum(["none", "ready_for_review"]),
+  analysis: caseAnalysisSchema.nullable(),
+  draftReply: z.string().max(600),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+export type DemoWorkflow = z.infer<typeof demoWorkflowSchema>;
+
+export const demoDraftUpdateSchema = z.object({
+  draftReply: z.string().trim().min(5).max(600),
+});
