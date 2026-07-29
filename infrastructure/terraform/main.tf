@@ -10,6 +10,7 @@ locals {
     "aiplatform.googleapis.com",
     "artifactregistry.googleapis.com",
     "bigquery.googleapis.com",
+    "cloudbilling.googleapis.com",
     "billingbudgets.googleapis.com",
     "cloudbuild.googleapis.com",
     "compute.googleapis.com",
