@@ -24,6 +24,10 @@ locals {
   ])
 }
 
+data "google_project" "current" {
+  project_id = var.project_id
+}
+
 resource "google_project_service" "required" {
   for_each = local.services
   project  = var.project_id
@@ -101,7 +105,7 @@ resource "google_firestore_database" "default" {
 
 resource "google_storage_bucket" "evidence" {
   name                        = "${var.project_id}-product-evidence"
-  location                    = var.firestore_location
+  location                    = var.evidence_bucket_location
   uniform_bucket_level_access = true
   public_access_prevention    = "enforced"
   force_destroy               = false
@@ -191,7 +195,7 @@ resource "google_billing_budget" "monthly" {
   display_name    = "FieldSpark monthly budget"
 
   budget_filter {
-    projects = ["projects/${var.project_id}"]
+    projects = ["projects/${data.google_project.current.number}"]
   }
 
   amount {

@@ -10,9 +10,15 @@ variable "region" {
 }
 
 variable "firestore_location" {
-  description = "Firestore and evidence data location."
+  description = "Firestore database location."
   type        = string
   default     = "nam5"
+}
+
+variable "evidence_bucket_location" {
+  description = "Cloud Storage location for private product evidence."
+  type        = string
+  default     = "US"
 }
 
 variable "github_repository" {
@@ -31,5 +37,5 @@ variable "billing_account_id" {
 variable "monthly_budget_usd" {
   description = "Monthly budget threshold."
   type        = number
-  default     = 75
+  default     = 25
 }
