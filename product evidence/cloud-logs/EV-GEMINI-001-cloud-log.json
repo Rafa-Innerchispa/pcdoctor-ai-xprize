@@ -1,0 +1,19 @@
+{
+  "evidenceId": "EV-GEMINI-001-LOG",
+  "source": "Google Cloud Logging",
+  "environment": "gcp-staging",
+  "projectId": "pcdoctor-ai-xprize-2026",
+  "region": "us-central1",
+  "service": "fieldspark-api",
+  "revision": "fieldspark-api-00005-7tb",
+  "timestamp": "2026-07-29T12:35:36.490903Z",
+  "message": "agent decision completed",
+  "eventId": "94f2ed49-38c8-4840-b941-993db04c720b",
+  "matchedEntries": 1,
+  "queryShape": "Cloud Run revision + service name + structured audit event ID",
+  "redaction": {
+    "credentialsIncluded": false,
+    "requestHeadersIncluded": false,
+    "customerDataIncluded": false
+  }
+}
