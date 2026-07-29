@@ -1,0 +1,7 @@
+project_id          = "replace-with-globally-unique-project-id"
+region              = "us-central1"
+firestore_location  = "nam5"
+github_repository   = "Rafa-Innerchispa/pcdoctor-ai-xprize"
+monthly_budget_usd  = 75
+
+# Supply billing_account_id securely at apply time if a budget should be created.

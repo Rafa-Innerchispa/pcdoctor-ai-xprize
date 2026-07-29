@@ -1,0 +1,24 @@
+{
+  "name": "pcdoctor-ai-xprize",
+  "version": "0.1.0",
+  "private": true,
+  "description": "FieldSpark AI — AI-operated customer continuity for service SMBs",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "concurrently -n api,web -c cyan,magenta \"npm run dev -w @fieldspark/api\" \"npm run dev -w @fieldspark/web\"",
+    "build": "npm run build -w @fieldspark/contracts && npm run build -w @fieldspark/api && npm run build -w @fieldspark/web",
+    "typecheck": "npm run build -w @fieldspark/contracts && npm run typecheck -w @fieldspark/contracts && npm run typecheck -w @fieldspark/api && npm run typecheck -w @fieldspark/web",
+    "test": "npm run test -w @fieldspark/api",
+    "check:secrets": "node scripts/check-secrets.mjs",
+    "check": "npm run typecheck && npm test && npm run build && npm run check:secrets"
+  },
+  "devDependencies": {
+    "concurrently": "10.0.4"
+  }
+}

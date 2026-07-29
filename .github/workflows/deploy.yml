@@ -1,0 +1,79 @@
+name: Deploy staging
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_staging:
+        description: "Type DEPLOY-STAGING"
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: fieldspark-staging
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: inputs.confirm_staging == 'DEPLOY-STAGING'
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: Configure registry
+        run: gcloud auth configure-docker "${{ vars.GCP_REGION }}-docker.pkg.dev" --quiet
+
+      - name: Build and push immutable images
+        env:
+          REGISTRY: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/fieldspark
+          SHA: ${{ github.sha }}
+        run: |
+          docker build -f apps/api/Dockerfile -t "$REGISTRY/api:$SHA" .
+          docker build -f apps/web/Dockerfile -t "$REGISTRY/web:$SHA" .
+          docker push "$REGISTRY/api:$SHA"
+          docker push "$REGISTRY/web:$SHA"
+
+      - name: Deploy API
+        env:
+          REGISTRY: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/fieldspark
+          SHA: ${{ github.sha }}
+        run: |
+          gcloud run deploy fieldspark-api \
+            --image "$REGISTRY/api:$SHA" \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION }}" \
+            --service-account "${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}" \
+            --allow-unauthenticated \
+            --set-env-vars "NODE_ENV=production,DEMO_MODE=false,OUTBOUND_ENABLED=false,INVOICING_ENABLED=false,EVENT_STORE=firestore,GOOGLE_CLOUD_PROJECT=${{ vars.GCP_PROJECT_ID }},GOOGLE_CLOUD_LOCATION=global,GEMINI_MODEL=gemini-2.5-flash" \
+            --set-secrets "API_ADMIN_KEY=fieldspark-api-admin-key:latest" \
+            --max-instances 4 \
+            --memory 512Mi \
+            --cpu 1
+
+      - name: Deploy web
+        env:
+          REGISTRY: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/fieldspark
+          SHA: ${{ github.sha }}
+        run: |
+          gcloud run deploy fieldspark-web \
+            --image "$REGISTRY/web:$SHA" \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION }}" \
+            --service-account "${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}" \
+            --allow-unauthenticated \
+            --max-instances 4 \
+            --memory 512Mi \
+            --cpu 1
+
+      - name: Report revisions
+        run: |
+          gcloud run services describe fieldspark-api --region "${{ vars.GCP_REGION }}" --format="value(status.url,status.latestReadyRevisionName)"
+          gcloud run services describe fieldspark-web --region "${{ vars.GCP_REGION }}" --format="value(status.url,status.latestReadyRevisionName)"

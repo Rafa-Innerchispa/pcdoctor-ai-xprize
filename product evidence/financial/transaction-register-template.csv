@@ -1,0 +1,1 @@
+transaction_id,date_utc,type,customer_id_redacted,description,amount_usd,invoice_reference_redacted,payment_reference_redacted,bank_reconciled,evidence_ids,notes

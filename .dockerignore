@@ -1,0 +1,15 @@
+.git
+.github
+node_modules
+**/node_modules
+**/.next
+**/dist
+coverage
+.terraform
+*.tfstate*
+.env
+.env.*
+!.env.example
+product evidence/private
+product evidence/raw
+*.log
