@@ -147,32 +147,33 @@ export class AuthorizedTaxRegistry {
       );
     }
 
-    const token = await this.getToken();
-    const controller = new AbortController();
-    const timeout = setTimeout(
-      () => controller.abort(),
-      this.config.RUC_API_TIMEOUT_MS,
+    let token = await this.getToken();
+    let response = await this.requestWithRetry(
+      `${this.config.RUC_API_LOOKUP_BASE_URL.replace(/\/$/, "")}/api/ruc/${local.identifier}`,
+      {
+        headers: {
+          accept: "application/json",
+          authorization: `Bearer ${token}`,
+        },
+      },
+      "tax_registry_unavailable",
+      "No se pudo consultar el registro tributario.",
     );
-    let response: Response;
-    try {
-      response = await fetch(
+    if (response.status === 401) {
+      this.token = "";
+      this.tokenExpiresAt = 0;
+      token = await this.getToken();
+      response = await this.requestWithRetry(
         `${this.config.RUC_API_LOOKUP_BASE_URL.replace(/\/$/, "")}/api/ruc/${local.identifier}`,
         {
           headers: {
             accept: "application/json",
             authorization: `Bearer ${token}`,
           },
-          signal: controller.signal,
         },
-      );
-    } catch {
-      throw new EcuadorIdentityError(
         "tax_registry_unavailable",
         "No se pudo consultar el registro tributario.",
-        503,
       );
-    } finally {
-      clearTimeout(timeout);
     }
     if (response.status === 404) {
       throw new EcuadorIdentityError(
@@ -220,37 +221,22 @@ export class AuthorizedTaxRegistry {
     if (this.token && this.tokenExpiresAt > Date.now() + 30_000) {
       return this.token;
     }
-    const controller = new AbortController();
-    const timeout = setTimeout(
-      () => controller.abort(),
-      this.config.RUC_API_TIMEOUT_MS,
-    );
-    let response: Response;
-    try {
-      response = await fetch(
-        `${this.config.RUC_API_TOKEN_BASE_URL.replace(/\/$/, "")}/v1/deuna/creacion-token`,
-        {
-          method: "POST",
-          headers: {
-            accept: "application/json",
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({
-            usuario: this.config.RUC_API_USERNAME,
-            pass: this.config.RUC_API_PASSWORD,
-          }),
-          signal: controller.signal,
+    const response = await this.requestWithRetry(
+      `${this.config.RUC_API_TOKEN_BASE_URL.replace(/\/$/, "")}/v1/deuna/creacion-token`,
+      {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/json",
         },
-      );
-    } catch {
-      throw new EcuadorIdentityError(
-        "tax_registry_token_unavailable",
-        "No se pudo autenticar con el registro tributario.",
-        503,
-      );
-    } finally {
-      clearTimeout(timeout);
-    }
+        body: JSON.stringify({
+          usuario: this.config.RUC_API_USERNAME,
+          pass: this.config.RUC_API_PASSWORD,
+        }),
+      },
+      "tax_registry_token_unavailable",
+      "No se pudo autenticar con el registro tributario.",
+    );
     const payload = (await response.json().catch(() => null)) as {
       data?: { response?: unknown };
     } | null;
@@ -265,5 +251,37 @@ export class AuthorizedTaxRegistry {
     this.token = token;
     this.tokenExpiresAt = Date.now() + 10 * 60_000;
     return token;
+  }
+
+  private async requestWithRetry(
+    url: string,
+    init: RequestInit,
+    errorCode: string,
+    publicMessage: string,
+  ) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const controller = new AbortController();
+      const timeout = setTimeout(
+        () => controller.abort(),
+        this.config.RUC_API_TIMEOUT_MS,
+      );
+      try {
+        const response = await fetch(url, {
+          ...init,
+          signal: controller.signal,
+        });
+        if (response.status < 500 || attempt === 2) return response;
+      } catch {
+        if (attempt === 2) {
+          throw new EcuadorIdentityError(errorCode, publicMessage, 503);
+        }
+      } finally {
+        clearTimeout(timeout);
+      }
+      await new Promise((resolve) =>
+        setTimeout(resolve, 100 * 2 ** attempt),
+      );
+    }
+    throw new EcuadorIdentityError(errorCode, publicMessage, 503);
   }
 }
