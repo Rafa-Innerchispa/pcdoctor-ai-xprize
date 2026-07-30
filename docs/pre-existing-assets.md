@@ -7,6 +7,7 @@ This inventory distinguishes historical assets from hackathon work.
 | PC Doctor field-service knowledge | pre-2026 | PC Doctor | CCTV, alarms, fire, networks, support | domain vocabulary and operational review | encoded playbook and audit controls |
 | Local servers | pre-2026 | PC Doctor | internal workloads | development/integration only | no production dependency |
 | n8n flows | pre-2026 | PC Doctor | generic automation | reference patterns where reliable | tenant-safe, evidenced workflows |
+| QuoteOps Ecuador identity boundary | pre-2026 | PC Doctor | cédula/RUC checksum, authorized registry adapter, customer reconciliation | adapted pattern, independently implemented | local checksum, optional secret-backed registry lookup, tenant-safe case identity |
 | Inspection/cotation forms | pre-2026 | PC Doctor | service operations | discovery field reference | AI-normalized intake and approvals |
 | RalphiIA / Maestro / QuoteOps / FounderOS | pre-2026 | PC Doctor | internal orchestration concepts | optional generic components | explicit adapter, no legacy claims |
 | Evolution API deployment | pre-2026 | PC Doctor | WhatsApp integration testing | deployment knowledge | cloud-isolated, multi-tenant controls |

@@ -13,7 +13,32 @@ import type { AuthenticatedIdentity } from "./auth.js";
 import type { AppConfig } from "./config.js";
 import type { IdentityStore } from "./identity-store.js";
 
-const PCDOCTOR_TENANT_ID = "pcdoctor-ec";
+const ownerTenants = [
+  {
+    id: "pcdoctor-ec",
+    slug: "pcdoctor",
+    legalName: "PC Doctor",
+    displayName: "PC Doctor",
+    playbook: "pcdoctor",
+    environment: "production",
+  },
+  {
+    id: "iapro-ec",
+    slug: "iapro",
+    legalName: "IAPRO S.A.S.",
+    displayName: "IAPRO",
+    playbook: "iapro",
+    environment: "production",
+  },
+  {
+    id: "studio-pilot",
+    slug: "estudio-fotografico",
+    legalName: "Identidad legal pendiente de confirmación",
+    displayName: "Estudio fotográfico",
+    playbook: "photography_studio",
+    environment: "staging",
+  },
+] as const;
 
 export function membershipId(tenantId: string, userId: string) {
   return `${tenantId}__${userId}`;
@@ -51,37 +76,34 @@ export async function bootstrapSession(
     identity.email.toLowerCase() ===
     config.BOOTSTRAP_OWNER_EMAIL.toLowerCase()
   ) {
-    const currentTenant = await store.getTenant(PCDOCTOR_TENANT_ID);
-    if (!currentTenant) {
-      await store.upsertTenant(
-        tenantSchema.parse({
-          id: PCDOCTOR_TENANT_ID,
-          slug: "pcdoctor",
-          legalName: "PC Doctor",
-          displayName: "PC Doctor",
-          playbook: "pcdoctor",
-          status: "active",
-          environment: "production",
-          createdAt: now,
-          updatedAt: now,
-        }),
-      );
-    }
-    const id = membershipId(PCDOCTOR_TENANT_ID, identity.uid);
-    const currentMembership = await store.getMembership(id);
-    if (!currentMembership) {
-      await store.upsertMembership(
-        membershipSchema.parse({
-          id,
-          tenantId: PCDOCTOR_TENANT_ID,
-          userId: identity.uid,
-          role: "platform_owner",
-          permissions: [...defaultPermissionsByRole.platform_owner],
-          status: "active",
-          createdAt: now,
-          updatedAt: now,
-        }),
-      );
+    for (const ownerTenant of ownerTenants) {
+      const currentTenant = await store.getTenant(ownerTenant.id);
+      if (!currentTenant) {
+        await store.upsertTenant(
+          tenantSchema.parse({
+            ...ownerTenant,
+            status: "active",
+            createdAt: now,
+            updatedAt: now,
+          }),
+        );
+      }
+      const id = membershipId(ownerTenant.id, identity.uid);
+      const currentMembership = await store.getMembership(id);
+      if (!currentMembership) {
+        await store.upsertMembership(
+          membershipSchema.parse({
+            id,
+            tenantId: ownerTenant.id,
+            userId: identity.uid,
+            role: "platform_owner",
+            permissions: [...defaultPermissionsByRole.platform_owner],
+            status: "active",
+            createdAt: now,
+            updatedAt: now,
+          }),
+        );
+      }
     }
   }
 
@@ -163,4 +185,3 @@ export function canManageMembers(membership: Membership) {
 }
 
 export type { Invitation };
-

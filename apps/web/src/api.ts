@@ -1,10 +1,14 @@
 import type {
+  BusinessCase,
+  CaseTransitionRequest,
   DemoWorkflow,
+  EcIdentityValidation,
   FieldSparkPermission,
   FieldSparkRole,
   FieldSparkSession,
   Invitation,
   Membership,
+  PlaybookDefinition,
   SyntheticContact,
 } from "@fieldspark/contracts";
 import { getCurrentIdToken } from "./firebase";
@@ -96,6 +100,59 @@ export async function updateMember(
   return apiRequest<{ membership: Membership }>(
     `/v1/tenants/${encodeURIComponent(tenantId)}/members/${encodeURIComponent(userId)}`,
     { method: "PATCH", body: JSON.stringify(input) },
+  );
+}
+
+export async function loadPlaybooks() {
+  return apiRequest<{ playbooks: PlaybookDefinition[] }>("/v1/playbooks");
+}
+
+export async function validateEcIdentity(
+  identifier: string,
+  lookup: "local" | "authorized" = "local",
+) {
+  return apiRequest<{
+    validation: EcIdentityValidation;
+    registryConfigured: boolean;
+  }>("/v1/identity/validate", {
+    method: "POST",
+    body: JSON.stringify({ identifier, lookup }),
+  });
+}
+
+export async function loadBusinessCases(tenantId: string) {
+  return apiRequest<{ cases: BusinessCase[] }>(
+    `/v1/tenants/${encodeURIComponent(tenantId)}/cases`,
+  );
+}
+
+export async function createBusinessCase(
+  tenantId: string,
+  input: {
+    customerId: string;
+    customerUserId?: string | null;
+    customerName: string;
+    customerIdentifier: string;
+    title: string;
+    description: string;
+    assignedTo?: string | null;
+    synthetic: boolean;
+  },
+) {
+  return apiRequest<{ case: BusinessCase }>(
+    `/v1/tenants/${encodeURIComponent(tenantId)}/cases`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
+}
+
+export async function transitionBusinessCase(
+  tenantId: string,
+  caseId: string,
+  input: CaseTransitionRequest,
+) {
+  return apiRequest<{ case: BusinessCase }>(
+    `/v1/tenants/${encodeURIComponent(tenantId)}/cases/${encodeURIComponent(caseId)}/transitions`,
+    { method: "POST", body: JSON.stringify(input) },
   );
 }
 
