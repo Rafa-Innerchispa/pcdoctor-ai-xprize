@@ -1,14 +1,25 @@
-import type { DemoWorkflow, SyntheticContact } from "@fieldspark/contracts";
+import type {
+  DemoWorkflow,
+  FieldSparkPermission,
+  FieldSparkRole,
+  FieldSparkSession,
+  Invitation,
+  Membership,
+  SyntheticContact,
+} from "@fieldspark/contracts";
+import { getCurrentIdToken } from "./firebase";
 
-const apiUrl = (
+export const apiUrl = (
   import.meta.env.VITE_API_URL || "http://localhost:8080"
 ).replace(/\/$/, "");
 
 async function apiRequest<T>(path: string, options?: RequestInit): Promise<T> {
+  const token = await getCurrentIdToken();
   const response = await fetch(`${apiUrl}${path}`, {
     ...options,
     headers: {
       "content-type": "application/json",
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
       ...options?.headers,
     },
   });
@@ -19,6 +30,73 @@ async function apiRequest<T>(path: string, options?: RequestInit): Promise<T> {
     throw new Error(body?.error ?? `request_failed_${response.status}`);
   }
   return (await response.json()) as T;
+}
+
+export async function loadSession() {
+  return apiRequest<FieldSparkSession>("/v1/session");
+}
+
+export async function updateProfile(profile: {
+  displayName: string;
+  phone: string;
+  taxId: string;
+  personType: "natural" | "company";
+  legalName: string;
+}) {
+  return apiRequest<FieldSparkSession>("/v1/profile", {
+    method: "PUT",
+    body: JSON.stringify(profile),
+  });
+}
+
+export async function loadTenantMembers(tenantId: string) {
+  return apiRequest<{
+    members: Array<{
+      membership: Membership;
+      user: {
+        uid: string;
+        displayName: string;
+        email: string;
+        photoUrl: string | null;
+        status: string;
+      } | null;
+    }>;
+  }>(`/v1/tenants/${encodeURIComponent(tenantId)}/members`);
+}
+
+export async function loadInvitations(tenantId: string) {
+  return apiRequest<{ invitations: Invitation[] }>(
+    `/v1/tenants/${encodeURIComponent(tenantId)}/invitations`,
+  );
+}
+
+export async function createInvitation(
+  tenantId: string,
+  input: {
+    email: string;
+    role: Exclude<FieldSparkRole, "platform_owner">;
+    permissions: FieldSparkPermission[];
+  },
+) {
+  return apiRequest<{ invitation: Invitation }>(
+    `/v1/tenants/${encodeURIComponent(tenantId)}/invitations`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
+}
+
+export async function updateMember(
+  tenantId: string,
+  userId: string,
+  input: {
+    role: Exclude<FieldSparkRole, "platform_owner">;
+    permissions: FieldSparkPermission[];
+    status: "active" | "suspended";
+  },
+) {
+  return apiRequest<{ membership: Membership }>(
+    `/v1/tenants/${encodeURIComponent(tenantId)}/members/${encodeURIComponent(userId)}`,
+    { method: "PATCH", body: JSON.stringify(input) },
+  );
 }
 
 export async function loadDemoState() {

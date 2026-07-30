@@ -28,6 +28,10 @@ export const eventNames = [
   "agent_error",
   "agent_retry",
   "agent_decision_completed",
+  "user_registered",
+  "tenant_created",
+  "member_invited",
+  "member_permissions_updated",
 ] as const;
 
 export const actorTypes = ["agent", "human", "system", "customer"] as const;
@@ -115,3 +119,182 @@ export type DemoWorkflow = z.infer<typeof demoWorkflowSchema>;
 export const demoDraftUpdateSchema = z.object({
   draftReply: z.string().trim().min(5).max(600),
 });
+
+export const fieldSparkRoles = [
+  "platform_owner",
+  "administrator",
+  "collaborator",
+  "customer",
+] as const;
+
+export const fieldSparkPermissions = [
+  "tenant.manage",
+  "members.manage",
+  "customers.view",
+  "customers.manage",
+  "cases.view",
+  "cases.manage",
+  "quotes.view",
+  "quotes.manage",
+  "quotes.approve",
+  "services.view",
+  "services.manage",
+  "billing.view",
+  "billing.prepare",
+  "billing.issue",
+  "messages.prepare",
+  "messages.approve",
+  "messages.send",
+  "reports.view",
+  "audit.view",
+  "integrations.manage",
+] as const;
+
+export const fieldSparkRoleSchema = z.enum(fieldSparkRoles);
+export const fieldSparkPermissionSchema = z.enum(fieldSparkPermissions);
+export type FieldSparkRole = z.infer<typeof fieldSparkRoleSchema>;
+export type FieldSparkPermission = z.infer<typeof fieldSparkPermissionSchema>;
+
+export const defaultPermissionsByRole: Record<
+  FieldSparkRole,
+  readonly FieldSparkPermission[]
+> = {
+  platform_owner: fieldSparkPermissions,
+  administrator: fieldSparkPermissions.filter(
+    (permission) => permission !== "billing.issue",
+  ),
+  collaborator: [
+    "customers.view",
+    "customers.manage",
+    "cases.view",
+    "cases.manage",
+    "quotes.view",
+    "quotes.manage",
+    "services.view",
+    "services.manage",
+    "billing.view",
+    "billing.prepare",
+    "messages.prepare",
+    "reports.view",
+  ],
+  customer: [
+    "cases.view",
+    "quotes.view",
+    "services.view",
+    "billing.view",
+  ],
+};
+
+export const tenantPlaybooks = [
+  "pcdoctor",
+  "iapro",
+  "photography_studio",
+] as const;
+
+export const tenantSchema = z.object({
+  id: z.string().min(3).max(80),
+  slug: z.string().regex(/^[a-z0-9-]{3,50}$/),
+  legalName: z.string().min(2).max(180),
+  displayName: z.string().min(2).max(120),
+  playbook: z.enum(tenantPlaybooks),
+  status: z.enum(["active", "suspended"]),
+  environment: z.enum(["staging", "production"]),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+export type Tenant = z.infer<typeof tenantSchema>;
+
+export const userProfileSchema = z.object({
+  uid: z.string().min(3).max(160),
+  email: z.string().email(),
+  emailVerified: z.boolean(),
+  displayName: z.string().max(120),
+  phone: z.string().max(20),
+  taxId: z.string().max(13),
+  personType: z.enum(["natural", "company"]).nullable(),
+  legalName: z.string().max(180),
+  photoUrl: z.string().url().nullable(),
+  status: z.enum(["pending_profile", "pending_access", "active", "suspended"]),
+  profileComplete: z.boolean(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+export type UserProfile = z.infer<typeof userProfileSchema>;
+
+export const membershipSchema = z.object({
+  id: z.string().min(3).max(260),
+  tenantId: z.string().min(3).max(80),
+  userId: z.string().min(3).max(160),
+  role: fieldSparkRoleSchema,
+  permissions: z.array(fieldSparkPermissionSchema),
+  status: z.enum(["active", "suspended"]),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+export type Membership = z.infer<typeof membershipSchema>;
+
+export const invitationSchema = z.object({
+  id: z.string().min(3).max(260),
+  tenantId: z.string().min(3).max(80),
+  email: z.string().email(),
+  role: z.enum(["administrator", "collaborator", "customer"]),
+  permissions: z.array(fieldSparkPermissionSchema),
+  status: z.enum(["pending", "accepted", "revoked"]),
+  invitedBy: z.string().min(3).max(160),
+  acceptedBy: z.string().min(3).max(160).nullable(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+export type Invitation = z.infer<typeof invitationSchema>;
+
+export const profileUpdateSchema = z
+  .object({
+    displayName: z.string().trim().min(2).max(120),
+    phone: z
+      .string()
+      .trim()
+      .regex(/^\+?[0-9]{8,15}$/),
+    taxId: z
+      .string()
+      .trim()
+      .regex(/^(\d{10}|\d{13})$/),
+    personType: z.enum(["natural", "company"]),
+    legalName: z.string().trim().max(180),
+  })
+  .superRefine((value, context) => {
+    if (value.personType === "company" && value.legalName.length < 2) {
+      context.addIssue({
+        code: "custom",
+        path: ["legalName"],
+        message: "La razón social es obligatoria para empresas.",
+      });
+    }
+  });
+
+export const invitationCreateSchema = z.object({
+  email: z.string().trim().email(),
+  role: z.enum(["administrator", "collaborator", "customer"]),
+  permissions: z.array(fieldSparkPermissionSchema).default([]),
+});
+
+export const memberUpdateSchema = z.object({
+  role: z.enum(["administrator", "collaborator", "customer"]),
+  permissions: z.array(fieldSparkPermissionSchema),
+  status: z.enum(["active", "suspended"]),
+});
+
+export const sessionSchema = z.object({
+  user: userProfileSchema,
+  memberships: z.array(
+    z.object({
+      membership: membershipSchema,
+      tenant: tenantSchema,
+    }),
+  ),
+});
+
+export type FieldSparkSession = z.infer<typeof sessionSchema>;
