@@ -277,6 +277,24 @@ export async function buildApp(
         details: parsed.error.flatten(),
       });
     }
+    if (parsed.data.lookup === "authorized" && !requireAdmin(request, config)) {
+      const identity = requireIdentity(request);
+      const memberships = (await identityStore.listMemberships()).filter(
+        (membership) =>
+          membership.userId === identity.uid &&
+          membership.status === "active",
+      );
+      const canUseRegistry = memberships.some(
+        (membership) =>
+          membership.role === "platform_owner" ||
+          membership.permissions.includes("customers.manage"),
+      );
+      if (!canUseRegistry) {
+        return reply
+          .code(403)
+          .send({ error: "authorized_registry_lookup_forbidden" });
+      }
+    }
     try {
       const validation =
         parsed.data.lookup === "authorized"
