@@ -4,6 +4,10 @@ import rateLimit from "@fastify/rate-limit";
 import {
   analyzeCaseRequestSchema,
   auditEventSchema,
+  businessCaseCreateSchema,
+  businessCaseSchema,
+  caseTransitionRequestSchema,
+  ecIdentityValidationRequestSchema,
   invitationCreateSchema,
   invitationSchema,
   memberUpdateSchema,
@@ -15,7 +19,9 @@ import {
   userProfileSchema,
   type AnalyzeCaseRequest,
   type AuditEvent,
+  type BusinessCase,
   type DemoWorkflow,
+  type FieldSparkPermission,
   type SyntheticContact,
 } from "@fieldspark/contracts";
 import Fastify, { type FastifyRequest } from "fastify";
@@ -26,9 +32,20 @@ import {
 } from "./auth.js";
 import { contactsToCsv } from "./contact-csv.js";
 import { createContactStore } from "./contact-store.js";
+import { createCaseStore } from "./case-store.js";
+import {
+  playbookDefinitions,
+  transitionCase,
+} from "./case-workflows.js";
 import { loadConfig, type AppConfig } from "./config.js";
 import { buildDemoAnalysis, overview } from "./demo.js";
 import { createEventStore } from "./event-store.js";
+import {
+  AuthorizedTaxRegistry,
+  buildLocalIdentityValidation,
+  EcuadorIdentityError,
+  validateEcuadorIdentifier,
+} from "./ecuador-identity.js";
 import { GeminiService } from "./gemini.js";
 import {
   bootstrapSession,
@@ -70,6 +87,7 @@ export async function buildApp(
   });
   const eventStore = createEventStore(config);
   const contactStore = createContactStore(config);
+  const caseStore = createCaseStore(config);
   const workflowStore = createWorkflowStore(config);
   const identityStore = createIdentityStore(config);
   const authVerifier =
@@ -78,6 +96,7 @@ export async function buildApp(
       : dependencies.authVerifier;
   const requestIdentities = new WeakMap<FastifyRequest, AuthenticatedIdentity>();
   const gemini = new GeminiService(config);
+  const taxRegistry = new AuthorizedTaxRegistry(config);
 
   await app.register(cors, {
     origin: config.WEB_ORIGIN.split(",").map((origin) => origin.trim()),
@@ -180,6 +199,26 @@ export async function buildApp(
         details: parsed.error.flatten(),
       });
     }
+    try {
+      const identifier = validateEcuadorIdentifier(parsed.data.taxId);
+      if (
+        parsed.data.personType === "company" &&
+        identifier.identifierType !== "ruc"
+      ) {
+        return reply.code(400).send({
+          error: "company_ruc_required",
+          message: "Para una empresa se requiere un RUC ecuatoriano válido.",
+        });
+      }
+    } catch (error) {
+      if (error instanceof EcuadorIdentityError) {
+        return reply.code(error.statusCode).send({
+          error: error.code,
+          message: error.message,
+        });
+      }
+      throw error;
+    }
     await bootstrapSession(identity, config, identityStore);
     const existing = await identityStore.getUser(identity.uid);
     if (!existing) {
@@ -205,6 +244,279 @@ export async function buildApp(
         : {};
     return typeof params[name] === "string" ? params[name] : "";
   }
+
+  async function tenantMembership(
+    request: FastifyRequest,
+    tenantId: string,
+  ) {
+    const identity = requireIdentity(request);
+    return findActiveMembership(identityStore, tenantId, identity.uid);
+  }
+
+  function hasPermission(
+    membership: NonNullable<
+      Awaited<ReturnType<typeof findActiveMembership>>
+    >,
+    permission: FieldSparkPermission,
+  ) {
+    return (
+      membership.role === "platform_owner" ||
+      membership.permissions.includes(permission)
+    );
+  }
+
+  app.get("/v1/playbooks", async () => ({
+    playbooks: Object.values(playbookDefinitions),
+  }));
+
+  app.post("/v1/identity/validate", async (request, reply) => {
+    const parsed = ecIdentityValidationRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: "invalid_identity_validation_request",
+        details: parsed.error.flatten(),
+      });
+    }
+    try {
+      const validation =
+        parsed.data.lookup === "authorized"
+          ? await taxRegistry.validate(parsed.data.identifier)
+          : buildLocalIdentityValidation(parsed.data.identifier);
+      return {
+        validation,
+        registryConfigured: taxRegistry.configured,
+      };
+    } catch (error) {
+      if (error instanceof EcuadorIdentityError) {
+        return reply.code(error.statusCode).send({
+          error: error.code,
+          message: error.message,
+          registryConfigured: taxRegistry.configured,
+        });
+      }
+      throw error;
+    }
+  });
+
+  async function appendCaseEvent(
+    request: FastifyRequest,
+    businessCase: BusinessCase,
+    values: Pick<
+      AuditEvent,
+      | "eventName"
+      | "actorType"
+      | "action"
+      | "inputSummary"
+      | "decision"
+      | "result"
+      | "humanApproval"
+    >,
+  ) {
+    const identity = requireIdentity(request);
+    const event = auditEventSchema.parse({
+      timestamp: new Date().toISOString(),
+      eventId: randomUUID(),
+      ...values,
+      tenantId: businessCase.tenantId,
+      customerId: businessCase.customerId,
+      caseId: businessCase.id,
+      agentId: identity.uid,
+      model: null,
+      requestReference: request.id,
+      inputTokens: null,
+      outputTokens: null,
+      estimatedCostUsd: null,
+      durationMs: 0,
+      status: "completed",
+      error: null,
+      evidenceVersion: "1.0",
+    });
+    await eventStore.append(event);
+    request.log.info({ auditEvent: event }, "business case event completed");
+    return event;
+  }
+
+  app.get("/v1/tenants/:tenantId/cases", async (request, reply) => {
+    const identity = requireIdentity(request);
+    const tenantId = routeParam(request, "tenantId");
+    const membership = await tenantMembership(request, tenantId);
+    if (!membership || !hasPermission(membership, "cases.view")) {
+      return reply.code(403).send({ error: "case_view_forbidden" });
+    }
+    const cases = await caseStore.list(tenantId);
+    return {
+      cases:
+        membership.role === "customer"
+          ? cases.filter(
+              (businessCase) =>
+                businessCase.customerUserId === identity.uid,
+            )
+          : cases,
+    };
+  });
+
+  app.post("/v1/tenants/:tenantId/cases", async (request, reply) => {
+    const identity = requireIdentity(request);
+    const tenantId = routeParam(request, "tenantId");
+    const membership = await tenantMembership(request, tenantId);
+    if (!membership || !hasPermission(membership, "cases.manage")) {
+      return reply.code(403).send({ error: "case_management_forbidden" });
+    }
+    const tenant = await identityStore.getTenant(tenantId);
+    if (!tenant) {
+      return reply.code(404).send({ error: "tenant_not_found" });
+    }
+    const parsed = businessCaseCreateSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: "invalid_case",
+        details: parsed.error.flatten(),
+      });
+    }
+    const now = new Date().toISOString();
+    const businessCase = businessCaseSchema.parse({
+      ...parsed.data,
+      id: randomUUID(),
+      tenantId,
+      playbook: tenant.playbook,
+      customerIdentifier: parsed.data.customerIdentifier.replace(/\D/g, ""),
+      currentStage: "intake",
+      status: "open",
+      identityValidation: null,
+      quoteAmountUsd: null,
+      quoteApproval: "not_requested",
+      billingPrepared: false,
+      invoiceIssued: false,
+      outboundAllowed: false,
+      createdBy: identity.uid,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await caseStore.upsert(businessCase);
+    const event = await appendCaseEvent(request, businessCase, {
+      eventName: "case_created",
+      actorType: "human",
+      action: "create_business_case",
+      inputSummary: businessCase.title,
+      decision: `Aplicar el flujo ${tenant.playbook}.`,
+      result: "Expediente creado sin ejecutar envíos ni facturación.",
+      humanApproval: "not_required",
+    });
+    return reply.code(201).send({ case: businessCase, event });
+  });
+
+  app.get(
+    "/v1/tenants/:tenantId/cases/:caseId",
+    async (request, reply) => {
+      const identity = requireIdentity(request);
+      const tenantId = routeParam(request, "tenantId");
+      const membership = await tenantMembership(request, tenantId);
+      if (!membership || !hasPermission(membership, "cases.view")) {
+        return reply.code(403).send({ error: "case_view_forbidden" });
+      }
+      const businessCase = await caseStore.get(routeParam(request, "caseId"));
+      if (!businessCase || businessCase.tenantId !== tenantId) {
+        return reply.code(404).send({ error: "case_not_found" });
+      }
+      if (
+        membership.role === "customer" &&
+        businessCase.customerUserId !== identity.uid
+      ) {
+        return reply.code(404).send({ error: "case_not_found" });
+      }
+      return {
+        case: businessCase,
+        playbook: playbookDefinitions[businessCase.playbook],
+      };
+    },
+  );
+
+  app.post(
+    "/v1/tenants/:tenantId/cases/:caseId/transitions",
+    async (request, reply) => {
+      const tenantId = routeParam(request, "tenantId");
+      const membership = await tenantMembership(request, tenantId);
+      if (!membership || !hasPermission(membership, "cases.manage")) {
+        return reply.code(403).send({ error: "case_management_forbidden" });
+      }
+      const parsed = caseTransitionRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: "invalid_case_transition_request",
+          details: parsed.error.flatten(),
+        });
+      }
+      if (
+        ["approve_quote", "reject_quote"].includes(parsed.data.action) &&
+        !hasPermission(membership, "quotes.approve")
+      ) {
+        return reply.code(403).send({ error: "quote_approval_forbidden" });
+      }
+      if (
+        parsed.data.action === "prepare_billing" &&
+        !hasPermission(membership, "billing.prepare")
+      ) {
+        return reply.code(403).send({ error: "billing_preparation_forbidden" });
+      }
+      const current = await caseStore.get(routeParam(request, "caseId"));
+      if (!current || current.tenantId !== tenantId) {
+        return reply.code(404).send({ error: "case_not_found" });
+      }
+      try {
+        const identityValidation =
+          parsed.data.action === "validate_identity"
+            ? parsed.data.identityLookup === "authorized"
+              ? await taxRegistry.validate(current.customerIdentifier)
+              : buildLocalIdentityValidation(current.customerIdentifier)
+            : undefined;
+        const updated = transitionCase(current, {
+          ...parsed.data,
+          identityValidation,
+        });
+        await caseStore.upsert(updated);
+        const event = await appendCaseEvent(request, updated, {
+          eventName:
+            parsed.data.action === "validate_identity"
+              ? "identity_validation_completed"
+              : "workflow_transition_completed",
+          actorType: "human",
+          action: parsed.data.action,
+          inputSummary: parsed.data.note || current.title,
+          decision: `${current.currentStage} → ${updated.currentStage}`,
+          result: `Expediente actualizado a ${updated.status}.`,
+          humanApproval:
+            parsed.data.action === "approve_quote"
+              ? "approved"
+              : parsed.data.action === "reject_quote"
+                ? "rejected"
+                : parsed.data.action === "prepare_quote"
+                  ? "required"
+                  : "not_required",
+        });
+        return { case: updated, event };
+      } catch (error) {
+        if (error instanceof EcuadorIdentityError) {
+          return reply.code(error.statusCode).send({
+            error: error.code,
+            message: error.message,
+          });
+        }
+        const code =
+          error instanceof Error ? error.message : "case_transition_failed";
+        if (
+          [
+            "invalid_case_transition",
+            "identity_validation_required",
+            "quote_amount_required",
+            "billing_preparation_required",
+          ].includes(code)
+        ) {
+          return reply.code(409).send({ error: code });
+        }
+        throw error;
+      }
+    },
+  );
 
   app.get("/v1/tenants/:tenantId/members", async (request, reply) => {
     const identity = requireIdentity(request);

@@ -26,6 +26,18 @@ const configSchema = z.object({
   GOOGLE_CLOUD_LOCATION: z.string().default("global"),
   GEMINI_MODEL: z.string().default("gemini-2.5-flash"),
   FIRESTORE_DATABASE: z.string().default("(default)"),
+  RUC_API_LIVE_ENABLED: booleanString,
+  RUC_API_TOKEN_BASE_URL: z.string().default(""),
+  RUC_API_LOOKUP_BASE_URL: z.string().default(""),
+  RUC_API_USERNAME: z.string().default(""),
+  RUC_API_PASSWORD: z.string().default(""),
+  RUC_API_TIMEOUT_MS: z.coerce.number().int().min(500).max(30_000).default(8_000),
+  RUC_API_CACHE_TTL_MS: z.coerce
+    .number()
+    .int()
+    .min(1_000)
+    .max(86_400_000)
+    .default(900_000),
 });
 
 export type AppConfig = z.infer<typeof configSchema>;

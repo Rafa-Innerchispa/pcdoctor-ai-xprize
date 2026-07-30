@@ -13,6 +13,7 @@ import {
   updateMember,
 } from "./api";
 import { useFieldSparkAuth } from "./auth-context";
+import { CasesPanel } from "./components/cases-panel";
 
 const roleLabels: Record<FieldSparkRole, string> = {
   platform_owner: "Propietario",
@@ -47,6 +48,7 @@ const permissionLabels: Record<FieldSparkPermission, string> = {
 const navByRole: Record<FieldSparkRole, string[]> = {
   platform_owner: [
     "Resumen",
+    "Expedientes",
     "Clientes",
     "Cotizaciones",
     "Servicios",
@@ -56,6 +58,7 @@ const navByRole: Record<FieldSparkRole, string[]> = {
   ],
   administrator: [
     "Resumen",
+    "Expedientes",
     "Clientes",
     "Cotizaciones",
     "Servicios",
@@ -64,13 +67,14 @@ const navByRole: Record<FieldSparkRole, string[]> = {
   ],
   collaborator: [
     "Resumen",
+    "Expedientes",
     "Clientes",
     "Cotizaciones",
     "Servicios",
     "Tareas",
   ],
   customer: [
-    "Mi historial",
+    "Mis expedientes",
     "Servicios",
     "Cotizaciones",
     "Facturas",
@@ -676,8 +680,13 @@ function TenantDashboard() {
           </div>
         </header>
         <div className="product-content">
-          {active === "Resumen" || active === "Mi historial" ? (
+          {active === "Resumen" ? (
             <OverviewPanel role={current.membership.role} />
+          ) : active === "Expedientes" || active === "Mis expedientes" ? (
+            <CasesPanel
+              tenant={current.tenant}
+              actor={current.membership}
+            />
           ) : active === "Equipo" ? (
             <TeamPanel
               tenantId={current.tenant.id}

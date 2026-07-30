@@ -32,6 +32,8 @@ export const eventNames = [
   "tenant_created",
   "member_invited",
   "member_permissions_updated",
+  "identity_validation_completed",
+  "workflow_transition_completed",
 ] as const;
 
 export const actorTypes = ["agent", "human", "system", "customer"] as const;
@@ -298,3 +300,127 @@ export const sessionSchema = z.object({
 });
 
 export type FieldSparkSession = z.infer<typeof sessionSchema>;
+
+export const ecIdentifierTypes = ["cedula", "ruc"] as const;
+export const ecIdentitySources = [
+  "local_checksum",
+  "authorized_registry",
+] as const;
+
+export const ecIdentityValidationRequestSchema = z.object({
+  identifier: z.string().trim().min(10).max(20),
+  lookup: z.enum(["local", "authorized"]).default("local"),
+});
+
+export const ecIdentityValidationSchema = z.object({
+  identifier: z.string().regex(/^(\d{10}|\d{13})$/),
+  identifierType: z.enum(ecIdentifierTypes),
+  locallyValid: z.boolean(),
+  registryVerified: z.boolean(),
+  source: z.enum(ecIdentitySources),
+  legalName: z.string().max(180),
+  commercialName: z.string().max(180),
+  activity: z.string().max(300),
+  status: z.enum(["locally_valid", "verified", "not_found", "unavailable"]),
+  verifiedAt: z.string().datetime(),
+});
+
+export type EcIdentityValidation = z.infer<
+  typeof ecIdentityValidationSchema
+>;
+
+export const caseStages = [
+  "intake",
+  "identity",
+  "discovery",
+  "quote",
+  "approval",
+  "service",
+  "billing",
+  "completed",
+] as const;
+
+export const caseTransitionActions = [
+  "complete_intake",
+  "validate_identity",
+  "complete_discovery",
+  "prepare_quote",
+  "approve_quote",
+  "reject_quote",
+  "complete_service",
+  "prepare_billing",
+  "close_case",
+] as const;
+
+export const businessCaseStatuses = [
+  "open",
+  "waiting_approval",
+  "active",
+  "billing_review",
+  "completed",
+] as const;
+
+export const businessCaseSchema = z.object({
+  id: z.string().min(3).max(100),
+  tenantId: z.string().min(3).max(80),
+  playbook: z.enum(tenantPlaybooks),
+  customerId: z.string().min(3).max(100),
+  customerUserId: z.string().min(3).max(160).nullable(),
+  customerName: z.string().min(2).max(180),
+  customerIdentifier: z.string().max(13),
+  title: z.string().min(3).max(180),
+  description: z.string().min(3).max(12_000),
+  currentStage: z.enum(caseStages),
+  status: z.enum(businessCaseStatuses),
+  identityValidation: ecIdentityValidationSchema.nullable(),
+  quoteAmountUsd: z.number().nonnegative().nullable(),
+  quoteApproval: z.enum(["not_requested", "pending", "approved", "rejected"]),
+  billingPrepared: z.boolean(),
+  invoiceIssued: z.boolean(),
+  outboundAllowed: z.boolean(),
+  synthetic: z.boolean(),
+  assignedTo: z.string().max(160).nullable(),
+  createdBy: z.string().min(3).max(160),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+export type BusinessCase = z.infer<typeof businessCaseSchema>;
+
+export const businessCaseCreateSchema = z.object({
+  customerId: z.string().trim().min(3).max(100),
+  customerUserId: z.string().trim().min(3).max(160).nullable().default(null),
+  customerName: z.string().trim().min(2).max(180),
+  customerIdentifier: z.string().trim().max(20).default(""),
+  title: z.string().trim().min(3).max(180),
+  description: z.string().trim().min(3).max(12_000),
+  assignedTo: z.string().trim().min(3).max(160).nullable().default(null),
+  synthetic: z.boolean().default(false),
+});
+
+export const caseTransitionRequestSchema = z.object({
+  action: z.enum(caseTransitionActions),
+  identityLookup: z.enum(["local", "authorized"]).default("local"),
+  quoteAmountUsd: z.number().nonnegative().optional(),
+  note: z.string().trim().max(1_000).default(""),
+});
+
+export type CaseTransitionRequest = z.infer<
+  typeof caseTransitionRequestSchema
+>;
+
+export const playbookStepSchema = z.object({
+  stage: z.enum(caseStages),
+  label: z.string().min(2).max(80),
+  objective: z.string().min(3).max(240),
+});
+
+export const playbookDefinitionSchema = z.object({
+  id: z.enum(tenantPlaybooks),
+  name: z.string().min(2).max(80),
+  steps: z.array(playbookStepSchema).length(caseStages.length),
+});
+
+export type PlaybookDefinition = z.infer<
+  typeof playbookDefinitionSchema
+>;

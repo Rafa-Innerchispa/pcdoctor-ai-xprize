@@ -1,14 +1,120 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "./app.js";
 import type { AuthVerifier } from "./auth.js";
+import {
+  isValidEcuadorCedula,
+  isValidEcuadorRuc,
+} from "./ecuador-identity.js";
 
 const apps: Awaited<ReturnType<typeof buildApp>>[] = [];
 
 afterEach(async () => {
   await Promise.all(apps.splice(0).map((app) => app.close()));
+  vi.unstubAllGlobals();
 });
 
 describe("FieldSpark API", () => {
+  it("validates Ecuadorian cedula and RUC checksums without network access", async () => {
+    expect(isValidEcuadorCedula("0100000009")).toBe(true);
+    expect(isValidEcuadorRuc("0100000009001")).toBe(true);
+    expect(isValidEcuadorRuc("0190000001001")).toBe(true);
+    expect(isValidEcuadorRuc("0160000000001")).toBe(true);
+    expect(isValidEcuadorCedula("0100000008")).toBe(false);
+
+    const app = await buildApp({ NODE_ENV: "test" });
+    apps.push(app);
+    const session = await app.inject({ method: "GET", url: "/v1/session" });
+    expect(session.statusCode).toBe(200);
+
+    const valid = await app.inject({
+      method: "POST",
+      url: "/v1/identity/validate",
+      payload: { identifier: "0100000009", lookup: "local" },
+    });
+    expect(valid.statusCode).toBe(200);
+    expect(valid.json()).toMatchObject({
+      registryConfigured: false,
+      validation: {
+        identifier: "0100000009",
+        identifierType: "cedula",
+        locallyValid: true,
+        registryVerified: false,
+        source: "local_checksum",
+      },
+    });
+
+    const invalid = await app.inject({
+      method: "POST",
+      url: "/v1/identity/validate",
+      payload: { identifier: "0100000008", lookup: "local" },
+    });
+    expect(invalid.statusCode).toBe(422);
+    expect(invalid.json().error).toBe("invalid_ec_identifier");
+  });
+
+  it("uses the authorized RUC provider with bounded credentials and cache", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+      if (url.endsWith("/v1/deuna/creacion-token")) {
+        return new Response(
+          JSON.stringify({ data: { response: "opaque-test-token" } }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          data: {
+            main: [
+              {
+                numeroRuc: "0190000001001",
+                razonSocial: "Empresa Sintética Verificada S.A.S.",
+                nombreComercial: "Empresa Sintética",
+                actividadContribuyente: "Pruebas controladas",
+                identificacionLegal: "must-not-be-exposed",
+              },
+            ],
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const app = await buildApp({
+      NODE_ENV: "test",
+      RUC_API_LIVE_ENABLED: "true",
+      RUC_API_TOKEN_BASE_URL: "https://token.example.invalid",
+      RUC_API_LOOKUP_BASE_URL: "https://registry.example.invalid",
+      RUC_API_USERNAME: "synthetic-user",
+      RUC_API_PASSWORD: "synthetic-password",
+    });
+    apps.push(app);
+    await app.inject({ method: "GET", url: "/v1/session" });
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const response = await app.inject({
+        method: "POST",
+        url: "/v1/identity/validate",
+        payload: { identifier: "0190000001001", lookup: "authorized" },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().validation).toMatchObject({
+        identifierType: "ruc",
+        registryVerified: true,
+        legalName: "Empresa Sintética Verificada S.A.S.",
+        source: "authorized_registry",
+      });
+      expect(JSON.stringify(response.json())).not.toContain(
+        "identificacionLegal",
+      );
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("reports safe defaults", async () => {
     const app = await buildApp({ NODE_ENV: "test" });
     apps.push(app);
@@ -223,6 +329,85 @@ describe("FieldSpark API", () => {
     expect(response.statusCode).toBe(409);
   });
 
+  it.each([
+    ["pcdoctor-ec", "pcdoctor"],
+    ["iapro-ec", "iapro"],
+    ["studio-pilot", "photography_studio"],
+  ] as const)(
+    "runs the complete guarded case journey for %s",
+    async (tenantId, playbook) => {
+      const app = await buildApp({ NODE_ENV: "test" });
+      apps.push(app);
+      const session = await app.inject({ method: "GET", url: "/v1/session" });
+      expect(session.statusCode).toBe(200);
+      expect(
+        session
+          .json()
+          .memberships.some(
+            (entry: { tenant: { id: string } }) =>
+              entry.tenant.id === tenantId,
+          ),
+      ).toBe(true);
+
+      const created = await app.inject({
+        method: "POST",
+        url: `/v1/tenants/${tenantId}/cases`,
+        payload: {
+          customerId: `customer-${tenantId}`,
+          customerName: `Cliente ${tenantId}`,
+          customerIdentifier: "0100000009",
+          title: `Solicitud ${tenantId}`,
+          description: "Expediente sintético para probar el recorrido completo.",
+          synthetic: true,
+        },
+      });
+      expect(created.statusCode).toBe(201);
+      expect(created.json().case).toMatchObject({
+        tenantId,
+        playbook,
+        currentStage: "intake",
+        outboundAllowed: false,
+        invoiceIssued: false,
+      });
+      const caseId = created.json().case.id as string;
+
+      const actions = [
+        { action: "complete_intake", stage: "identity" },
+        { action: "validate_identity", stage: "discovery" },
+        { action: "complete_discovery", stage: "quote" },
+        {
+          action: "prepare_quote",
+          quoteAmountUsd: 250,
+          stage: "approval",
+        },
+        { action: "approve_quote", stage: "service" },
+        { action: "complete_service", stage: "billing" },
+        { action: "prepare_billing", stage: "billing" },
+        { action: "close_case", stage: "completed" },
+      ] as const;
+
+      for (const transition of actions) {
+        const response = await app.inject({
+          method: "POST",
+          url: `/v1/tenants/${tenantId}/cases/${caseId}/transitions`,
+          payload: transition,
+        });
+        expect(response.statusCode, response.body).toBe(200);
+        expect(response.json().case.currentStage).toBe(transition.stage);
+        expect(response.json().case.invoiceIssued).toBe(false);
+        expect(response.json().case.outboundAllowed).toBe(false);
+      }
+
+      const wrongTenant = await app.inject({
+        method: "GET",
+        url: `/v1/tenants/${
+          tenantId === "pcdoctor-ec" ? "iapro-ec" : "pcdoctor-ec"
+        }/cases/${caseId}`,
+      });
+      expect(wrongTenant.statusCode).toBe(404);
+    },
+  );
+
   it("protects the product, bootstraps its owner and accepts invited users", async () => {
     const identities = {
       owner: {
@@ -266,14 +451,14 @@ describe("FieldSpark API", () => {
       headers: { authorization: "Bearer owner" },
     });
     expect(ownerSession.statusCode).toBe(200);
-    expect(ownerSession.json()).toMatchObject({
-      user: { email: "rafagye@gmail.com", profileComplete: false },
-      memberships: [
-        {
-          tenant: { id: "pcdoctor-ec", displayName: "PC Doctor" },
-          membership: { role: "platform_owner", status: "active" },
-        },
-      ],
+    expect(ownerSession.json().user).toMatchObject({
+      email: "rafagye@gmail.com",
+      profileComplete: false,
+    });
+    expect(ownerSession.json().memberships).toHaveLength(3);
+    expect(ownerSession.json().memberships[0]).toMatchObject({
+      tenant: { id: "pcdoctor-ec", displayName: "PC Doctor" },
+      membership: { role: "platform_owner", status: "active" },
     });
 
     const completedProfile = await app.inject({
@@ -283,7 +468,7 @@ describe("FieldSpark API", () => {
       payload: {
         displayName: "Rafael López",
         phone: "+593990000000",
-        taxId: "0912345678",
+        taxId: "0100000009",
         personType: "natural",
         legalName: "",
       },
@@ -323,5 +508,171 @@ describe("FieldSpark API", () => {
       headers: { authorization: "Bearer invited" },
     });
     expect(forbidden.statusCode).toBe(403);
+  });
+
+  it("enforces collaborator approvals and customer case visibility", async () => {
+    const identities = {
+      owner: {
+        uid: "owner-role-test",
+        email: "rafagye@gmail.com",
+        emailVerified: true,
+        displayName: "Rafael",
+        photoUrl: null,
+      },
+      collaborator: {
+        uid: "collaborator-role-test",
+        email: "operaciones@example.com",
+        emailVerified: true,
+        displayName: "Operaciones",
+        photoUrl: null,
+      },
+      customer: {
+        uid: "customer-role-test",
+        email: "cliente@example.com",
+        emailVerified: true,
+        displayName: "Cliente",
+        photoUrl: null,
+      },
+    } as const;
+    const authVerifier: AuthVerifier = {
+      async verify(token) {
+        const identity = identities[token as keyof typeof identities];
+        if (!identity) throw new Error("invalid token");
+        return identity;
+      },
+    };
+    const app = await buildApp(
+      {
+        NODE_ENV: "test",
+        AUTH_ENABLED: "true",
+        BOOTSTRAP_OWNER_EMAIL: "rafagye@gmail.com",
+      },
+      { authVerifier },
+    );
+    apps.push(app);
+    await app.inject({
+      method: "GET",
+      url: "/v1/session",
+      headers: { authorization: "Bearer owner" },
+    });
+
+    for (const invitation of [
+      {
+        email: "operaciones@example.com",
+        role: "collaborator",
+        permissions: [
+          "cases.view",
+          "cases.manage",
+          "quotes.view",
+          "quotes.manage",
+        ],
+      },
+      {
+        email: "cliente@example.com",
+        role: "customer",
+        permissions: ["cases.view", "quotes.view"],
+      },
+    ]) {
+      const response = await app.inject({
+        method: "POST",
+        url: "/v1/tenants/pcdoctor-ec/invitations",
+        headers: { authorization: "Bearer owner" },
+        payload: invitation,
+      });
+      expect(response.statusCode).toBe(201);
+    }
+    await app.inject({
+      method: "GET",
+      url: "/v1/session",
+      headers: { authorization: "Bearer collaborator" },
+    });
+    await app.inject({
+      method: "GET",
+      url: "/v1/session",
+      headers: { authorization: "Bearer customer" },
+    });
+
+    const visible = await app.inject({
+      method: "POST",
+      url: "/v1/tenants/pcdoctor-ec/cases",
+      headers: { authorization: "Bearer owner" },
+      payload: {
+        customerId: "customer-visible",
+        customerUserId: identities.customer.uid,
+        customerName: "Cliente visible",
+        customerIdentifier: "0100000009",
+        title: "Caso visible",
+        description: "Debe aparecer únicamente para el cliente vinculado.",
+        synthetic: true,
+      },
+    });
+    expect(visible.statusCode).toBe(201);
+    const hidden = await app.inject({
+      method: "POST",
+      url: "/v1/tenants/pcdoctor-ec/cases",
+      headers: { authorization: "Bearer owner" },
+      payload: {
+        customerId: "customer-hidden",
+        customerName: "Otro cliente",
+        customerIdentifier: "0100000009",
+        title: "Caso oculto",
+        description: "No debe aparecer en el portal del primer cliente.",
+        synthetic: true,
+      },
+    });
+    expect(hidden.statusCode).toBe(201);
+
+    const customerCases = await app.inject({
+      method: "GET",
+      url: "/v1/tenants/pcdoctor-ec/cases",
+      headers: { authorization: "Bearer customer" },
+    });
+    expect(customerCases.statusCode).toBe(200);
+    expect(customerCases.json().cases).toHaveLength(1);
+    expect(customerCases.json().cases[0].id).toBe(visible.json().case.id);
+
+    const collaboratorCase = await app.inject({
+      method: "POST",
+      url: "/v1/tenants/pcdoctor-ec/cases",
+      headers: { authorization: "Bearer collaborator" },
+      payload: {
+        customerId: "customer-collab",
+        customerName: "Cliente colaborador",
+        customerIdentifier: "0100000009",
+        title: "Caso operado",
+        description: "El colaborador puede preparar, pero no aprobar.",
+        synthetic: true,
+      },
+    });
+    const caseId = collaboratorCase.json().case.id as string;
+    for (const action of [
+      "complete_intake",
+      "validate_identity",
+      "complete_discovery",
+    ]) {
+      const response = await app.inject({
+        method: "POST",
+        url: `/v1/tenants/pcdoctor-ec/cases/${caseId}/transitions`,
+        headers: { authorization: "Bearer collaborator" },
+        payload: { action },
+      });
+      expect(response.statusCode).toBe(200);
+    }
+    const prepared = await app.inject({
+      method: "POST",
+      url: `/v1/tenants/pcdoctor-ec/cases/${caseId}/transitions`,
+      headers: { authorization: "Bearer collaborator" },
+      payload: { action: "prepare_quote", quoteAmountUsd: 400 },
+    });
+    expect(prepared.statusCode).toBe(200);
+
+    const forbiddenApproval = await app.inject({
+      method: "POST",
+      url: `/v1/tenants/pcdoctor-ec/cases/${caseId}/transitions`,
+      headers: { authorization: "Bearer collaborator" },
+      payload: { action: "approve_quote" },
+    });
+    expect(forbiddenApproval.statusCode).toBe(403);
+    expect(forbiddenApproval.json().error).toBe("quote_approval_forbidden");
   });
 });
