@@ -4,21 +4,40 @@ import rateLimit from "@fastify/rate-limit";
 import {
   analyzeCaseRequestSchema,
   auditEventSchema,
+  invitationCreateSchema,
+  invitationSchema,
+  memberUpdateSchema,
+  membershipSchema,
+  profileUpdateSchema,
   demoDraftUpdateSchema,
   demoWorkflowSchema,
   syntheticContacts,
+  userProfileSchema,
   type AnalyzeCaseRequest,
   type AuditEvent,
   type DemoWorkflow,
   type SyntheticContact,
 } from "@fieldspark/contracts";
 import Fastify, { type FastifyRequest } from "fastify";
+import {
+  createAuthVerifier,
+  type AuthenticatedIdentity,
+  type AuthVerifier,
+} from "./auth.js";
 import { contactsToCsv } from "./contact-csv.js";
 import { createContactStore } from "./contact-store.js";
 import { loadConfig, type AppConfig } from "./config.js";
 import { buildDemoAnalysis, overview } from "./demo.js";
 import { createEventStore } from "./event-store.js";
 import { GeminiService } from "./gemini.js";
+import {
+  bootstrapSession,
+  canManageMembers,
+  findActiveMembership,
+  invitationId,
+  membershipId,
+} from "./identity-service.js";
+import { createIdentityStore } from "./identity-store.js";
 import { redactSensitiveText } from "./redact.js";
 import { createWorkflowStore } from "./workflow-store.js";
 
@@ -39,6 +58,7 @@ function requireAdmin(request: FastifyRequest, config: AppConfig): boolean {
 
 export async function buildApp(
   overrides: Partial<Record<keyof AppConfig, unknown>> = {},
+  dependencies: { authVerifier?: AuthVerifier | null } = {},
 ) {
   const config = loadConfig(overrides);
   const app = Fastify({
@@ -51,13 +71,72 @@ export async function buildApp(
   const eventStore = createEventStore(config);
   const contactStore = createContactStore(config);
   const workflowStore = createWorkflowStore(config);
+  const identityStore = createIdentityStore(config);
+  const authVerifier =
+    dependencies.authVerifier === undefined
+      ? createAuthVerifier(config)
+      : dependencies.authVerifier;
+  const requestIdentities = new WeakMap<FastifyRequest, AuthenticatedIdentity>();
   const gemini = new GeminiService(config);
 
   await app.register(cors, {
     origin: config.WEB_ORIGIN.split(",").map((origin) => origin.trim()),
-    methods: ["GET", "POST"],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+    allowedHeaders: ["content-type", "authorization", "x-admin-key"],
   });
   await app.register(rateLimit, { max: 100, timeWindow: "1 minute" });
+
+  const publicRoutes = new Set([
+    "/health",
+    "/healthz",
+    "/v1/public/config",
+  ]);
+
+  app.addHook("preHandler", async (request, reply) => {
+    if (
+      request.method === "OPTIONS" ||
+      publicRoutes.has(request.routeOptions.url ?? request.url)
+    ) {
+      return;
+    }
+    if (requireAdmin(request, config)) {
+      requestIdentities.set(request, {
+        uid: "system-admin",
+        email: config.BOOTSTRAP_OWNER_EMAIL.toLowerCase(),
+        emailVerified: true,
+        displayName: "System administrator",
+        photoUrl: null,
+      });
+      return;
+    }
+    if (!config.AUTH_ENABLED) {
+      requestIdentities.set(request, {
+        uid: "local-owner",
+        email: config.BOOTSTRAP_OWNER_EMAIL.toLowerCase(),
+        emailVerified: true,
+        displayName: "Rafael",
+        photoUrl: null,
+      });
+      return;
+    }
+    const authorization = request.headers.authorization;
+    if (!authorization?.startsWith("Bearer ") || !authVerifier) {
+      return reply.code(401).send({ error: "authentication_required" });
+    }
+    try {
+      const identity = await authVerifier.verify(authorization.slice(7));
+      requestIdentities.set(request, identity);
+    } catch (error) {
+      request.log.warn({ err: error }, "identity token rejected");
+      return reply.code(401).send({ error: "invalid_identity_token" });
+    }
+  });
+
+  function requireIdentity(request: FastifyRequest) {
+    const identity = requestIdentities.get(request);
+    if (!identity) throw new Error("authenticated_identity_missing");
+    return identity;
+  }
 
   const healthResponse = async () => ({
     status: "ok",
@@ -69,6 +148,192 @@ export async function buildApp(
 
   app.get("/health", healthResponse);
   app.get("/healthz", healthResponse);
+
+  app.get("/v1/public/config", async () => ({
+    auth: {
+      enabled: config.AUTH_ENABLED,
+      firebase: config.AUTH_ENABLED
+        ? {
+            apiKey: config.FIREBASE_WEB_API_KEY,
+            authDomain: config.FIREBASE_AUTH_DOMAIN,
+            projectId: config.GOOGLE_CLOUD_PROJECT,
+            appId: config.FIREBASE_APP_ID,
+          }
+        : null,
+    },
+  }));
+
+  app.get("/v1/session", async (request) =>
+    bootstrapSession(requireIdentity(request), config, identityStore),
+  );
+
+  app.post("/v1/session/bootstrap", async (request) =>
+    bootstrapSession(requireIdentity(request), config, identityStore),
+  );
+
+  app.put("/v1/profile", async (request, reply) => {
+    const identity = requireIdentity(request);
+    const parsed = profileUpdateSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: "invalid_profile",
+        details: parsed.error.flatten(),
+      });
+    }
+    await bootstrapSession(identity, config, identityStore);
+    const existing = await identityStore.getUser(identity.uid);
+    if (!existing) {
+      return reply.code(409).send({ error: "profile_bootstrap_required" });
+    }
+    const now = new Date().toISOString();
+    await identityStore.upsertUser(
+      userProfileSchema.parse({
+        ...existing,
+        ...parsed.data,
+        profileComplete: true,
+        status: "active",
+        updatedAt: now,
+      }),
+    );
+    return bootstrapSession(identity, config, identityStore);
+  });
+
+  function routeParam(request: FastifyRequest, name: string) {
+    const params =
+      typeof request.params === "object" && request.params
+        ? (request.params as Record<string, unknown>)
+        : {};
+    return typeof params[name] === "string" ? params[name] : "";
+  }
+
+  app.get("/v1/tenants/:tenantId/members", async (request, reply) => {
+    const identity = requireIdentity(request);
+    const tenantId = routeParam(request, "tenantId");
+    const actorMembership = await findActiveMembership(
+      identityStore,
+      tenantId,
+      identity.uid,
+    );
+    if (!actorMembership || !canManageMembers(actorMembership)) {
+      return reply.code(403).send({ error: "member_management_forbidden" });
+    }
+    const memberships = (await identityStore.listMemberships()).filter(
+      (membership) => membership.tenantId === tenantId,
+    );
+    const members = [];
+    for (const membership of memberships) {
+      const user = await identityStore.getUser(membership.userId);
+      members.push({
+        membership,
+        user: user
+          ? {
+              uid: user.uid,
+              displayName: user.displayName,
+              email: user.email,
+              photoUrl: user.photoUrl,
+              status: user.status,
+            }
+          : null,
+      });
+    }
+    return { members };
+  });
+
+  app.get("/v1/tenants/:tenantId/invitations", async (request, reply) => {
+    const identity = requireIdentity(request);
+    const tenantId = routeParam(request, "tenantId");
+    const actorMembership = await findActiveMembership(
+      identityStore,
+      tenantId,
+      identity.uid,
+    );
+    if (!actorMembership || !canManageMembers(actorMembership)) {
+      return reply.code(403).send({ error: "member_management_forbidden" });
+    }
+    return {
+      invitations: (await identityStore.listInvitations()).filter(
+        (invitation) => invitation.tenantId === tenantId,
+      ),
+    };
+  });
+
+  app.post("/v1/tenants/:tenantId/invitations", async (request, reply) => {
+    const identity = requireIdentity(request);
+    const tenantId = routeParam(request, "tenantId");
+    const actorMembership = await findActiveMembership(
+      identityStore,
+      tenantId,
+      identity.uid,
+    );
+    if (!actorMembership || !canManageMembers(actorMembership)) {
+      return reply.code(403).send({ error: "member_management_forbidden" });
+    }
+    const parsed = invitationCreateSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: "invalid_invitation",
+        details: parsed.error.flatten(),
+      });
+    }
+    const now = new Date().toISOString();
+    const email = parsed.data.email.toLowerCase();
+    const invitation = invitationSchema.parse({
+      id: invitationId(tenantId, email),
+      tenantId,
+      email,
+      role: parsed.data.role,
+      permissions: parsed.data.permissions,
+      status: "pending",
+      invitedBy: identity.uid,
+      acceptedBy: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await identityStore.upsertInvitation(invitation);
+    return reply.code(201).send({ invitation });
+  });
+
+  app.patch(
+    "/v1/tenants/:tenantId/members/:userId",
+    async (request, reply) => {
+      const identity = requireIdentity(request);
+      const tenantId = routeParam(request, "tenantId");
+      const userId = routeParam(request, "userId");
+      const actorMembership = await findActiveMembership(
+        identityStore,
+        tenantId,
+        identity.uid,
+      );
+      if (!actorMembership || !canManageMembers(actorMembership)) {
+        return reply.code(403).send({ error: "member_management_forbidden" });
+      }
+      const parsed = memberUpdateSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: "invalid_member_update",
+          details: parsed.error.flatten(),
+        });
+      }
+      const id = membershipId(tenantId, userId);
+      const existing = await identityStore.getMembership(id);
+      if (!existing) {
+        return reply.code(404).send({ error: "membership_not_found" });
+      }
+      if (
+        existing.role === "platform_owner" &&
+        actorMembership.role !== "platform_owner"
+      ) {
+        return reply.code(403).send({ error: "platform_owner_protected" });
+      }
+      const membership = membershipSchema.parse({
+        ...existing,
+        ...parsed.data,
+        updatedAt: new Date().toISOString(),
+      });
+      await identityStore.upsertMembership(membership);
+      return { membership };
+    },
+  );
 
   app.get("/v1/demo/overview", async () => overview);
 

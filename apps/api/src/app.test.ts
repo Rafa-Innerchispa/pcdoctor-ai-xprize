@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { buildApp } from "./app.js";
+import type { AuthVerifier } from "./auth.js";
 
 const apps: Awaited<ReturnType<typeof buildApp>>[] = [];
 
@@ -220,5 +221,107 @@ describe("FieldSpark API", () => {
       url: "/v1/gemini/verify",
     });
     expect(response.statusCode).toBe(409);
+  });
+
+  it("protects the product, bootstraps its owner and accepts invited users", async () => {
+    const identities = {
+      owner: {
+        uid: "google-owner-001",
+        email: "rafagye@gmail.com",
+        emailVerified: true,
+        displayName: "Rafael",
+        photoUrl: null,
+      },
+      invited: {
+        uid: "google-collaborator-001",
+        email: "colaborador@example.com",
+        emailVerified: true,
+        displayName: "Colaborador",
+        photoUrl: null,
+      },
+    } as const;
+    const authVerifier: AuthVerifier = {
+      async verify(token) {
+        const identity = identities[token as keyof typeof identities];
+        if (!identity) throw new Error("invalid token");
+        return identity;
+      },
+    };
+    const app = await buildApp(
+      {
+        NODE_ENV: "test",
+        AUTH_ENABLED: "true",
+        BOOTSTRAP_OWNER_EMAIL: "rafagye@gmail.com",
+      },
+      { authVerifier },
+    );
+    apps.push(app);
+
+    const blocked = await app.inject({ method: "GET", url: "/v1/session" });
+    expect(blocked.statusCode).toBe(401);
+
+    const ownerSession = await app.inject({
+      method: "GET",
+      url: "/v1/session",
+      headers: { authorization: "Bearer owner" },
+    });
+    expect(ownerSession.statusCode).toBe(200);
+    expect(ownerSession.json()).toMatchObject({
+      user: { email: "rafagye@gmail.com", profileComplete: false },
+      memberships: [
+        {
+          tenant: { id: "pcdoctor-ec", displayName: "PC Doctor" },
+          membership: { role: "platform_owner", status: "active" },
+        },
+      ],
+    });
+
+    const completedProfile = await app.inject({
+      method: "PUT",
+      url: "/v1/profile",
+      headers: { authorization: "Bearer owner" },
+      payload: {
+        displayName: "Rafael López",
+        phone: "+593990000000",
+        taxId: "0912345678",
+        personType: "natural",
+        legalName: "",
+      },
+    });
+    expect(completedProfile.statusCode).toBe(200);
+    expect(completedProfile.json().user).toMatchObject({
+      profileComplete: true,
+      status: "active",
+    });
+
+    const invitation = await app.inject({
+      method: "POST",
+      url: "/v1/tenants/pcdoctor-ec/invitations",
+      headers: { authorization: "Bearer owner" },
+      payload: {
+        email: "colaborador@example.com",
+        role: "collaborator",
+        permissions: ["customers.view", "quotes.view"],
+      },
+    });
+    expect(invitation.statusCode).toBe(201);
+
+    const invitedSession = await app.inject({
+      method: "GET",
+      url: "/v1/session",
+      headers: { authorization: "Bearer invited" },
+    });
+    expect(invitedSession.statusCode).toBe(200);
+    expect(invitedSession.json().memberships[0].membership).toMatchObject({
+      role: "collaborator",
+      permissions: ["customers.view", "quotes.view"],
+    });
+
+    const forbidden = await app.inject({
+      method: "GET",
+      url: "/v1/tenants/pcdoctor-ec/members",
+      headers: { authorization: "Bearer invited" },
+    });
+    expect(forbidden.statusCode).toBe(403);
   });
 });
