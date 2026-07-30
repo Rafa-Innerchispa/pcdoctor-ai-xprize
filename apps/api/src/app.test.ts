@@ -53,6 +53,7 @@ describe("FieldSpark API", () => {
   });
 
   it("uses the authorized RUC provider with bounded credentials and cache", async () => {
+    let lookupAttempts = 0;
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url =
         typeof input === "string"
@@ -65,6 +66,10 @@ describe("FieldSpark API", () => {
           JSON.stringify({ data: { response: "opaque-test-token" } }),
           { status: 200, headers: { "content-type": "application/json" } },
         );
+      }
+      lookupAttempts += 1;
+      if (lookupAttempts === 1) {
+        throw new TypeError("synthetic transient network failure");
       }
       return new Response(
         JSON.stringify({
@@ -112,7 +117,7 @@ describe("FieldSpark API", () => {
         "identificacionLegal",
       );
     }
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("reports safe defaults", async () => {
