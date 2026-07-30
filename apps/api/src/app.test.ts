@@ -631,6 +631,17 @@ describe("FieldSpark API", () => {
     expect(customerCases.json().cases).toHaveLength(1);
     expect(customerCases.json().cases[0].id).toBe(visible.json().case.id);
 
+    const forbiddenRegistryLookup = await app.inject({
+      method: "POST",
+      url: "/v1/identity/validate",
+      headers: { authorization: "Bearer customer" },
+      payload: { identifier: "0190000001001", lookup: "authorized" },
+    });
+    expect(forbiddenRegistryLookup.statusCode).toBe(403);
+    expect(forbiddenRegistryLookup.json().error).toBe(
+      "authorized_registry_lookup_forbidden",
+    );
+
     const collaboratorCase = await app.inject({
       method: "POST",
       url: "/v1/tenants/pcdoctor-ec/cases",
