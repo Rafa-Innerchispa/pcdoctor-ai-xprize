@@ -1,5 +1,6 @@
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import * as mammoth from "mammoth";
+import { z } from "zod";
 import {
   caseAnalysisSchema,
   inspectionAnalysisSchema,
@@ -63,11 +64,9 @@ const inspectionAnalysisJsonSchema = {
     technicalContext: { type: "string" },
     findings: {
       type: "array",
-      maxItems: 20,
       items: {
         type: "object",
-        additionalProperties: false,
-        required: ["title", "detail", "severity", "evidenceIds", "confidence"],
+        required: ["title", "detail", "severity"],
         properties: {
           title: { type: "string" },
           detail: { type: "string" },
@@ -75,8 +74,6 @@ const inspectionAnalysisJsonSchema = {
             type: "string",
             enum: ["observation", "attention", "critical"],
           },
-          evidenceIds: { type: "array", items: { type: "string" } },
-          confidence: { type: "number", minimum: 0, maximum: 1 },
         },
       },
     },
@@ -84,21 +81,13 @@ const inspectionAnalysisJsonSchema = {
     recommendedActions: { type: "array", items: { type: "string" } },
     suggestedItems: {
       type: "array",
-      maxItems: 30,
       items: {
         type: "object",
-        additionalProperties: false,
-        required: ["code", "description", "quantity", "unit", "rationale", "catalogMatch"],
+        required: ["description", "quantity", "unit"],
         properties: {
-          code: { type: "string" },
           description: { type: "string" },
           quantity: { type: "number" },
           unit: { type: "string" },
-          rationale: { type: "string" },
-          catalogMatch: {
-            type: "string",
-            enum: ["existing", "new", "verify"],
-          },
         },
       },
     },
@@ -107,6 +96,30 @@ const inspectionAnalysisJsonSchema = {
     confidence: { type: "number", minimum: 0, maximum: 1 },
   },
 } as const;
+
+const inspectionModelOutputSchema = z.object({
+  executiveSummary: z.string(),
+  technicalContext: z.string(),
+  findings: z.array(
+    z.object({
+      title: z.string(),
+      detail: z.string(),
+      severity: z.enum(["observation", "attention", "critical"]),
+    }),
+  ),
+  measurements: z.array(z.string()),
+  recommendedActions: z.array(z.string()),
+  suggestedItems: z.array(
+    z.object({
+      description: z.string(),
+      quantity: z.number(),
+      unit: z.string(),
+    }),
+  ),
+  missingInformation: z.array(z.string()),
+  safetyLimitations: z.array(z.string()),
+  confidence: z.number().min(0).max(1),
+});
 
 export function estimateGeminiCostUsd({
   inputTokens,
@@ -323,9 +336,23 @@ export class GeminiService {
         },
       },
     });
-    const analysis = inspectionAnalysisSchema.parse(
+    const modelOutput = inspectionModelOutputSchema.parse(
       parseJsonResponse(response.text ?? "{}"),
     );
+    const analysis = inspectionAnalysisSchema.parse({
+      ...modelOutput,
+      findings: modelOutput.findings.map((finding) => ({
+        ...finding,
+        evidenceIds: [],
+        confidence: modelOutput.confidence,
+      })),
+      suggestedItems: modelOutput.suggestedItems.map((item) => ({
+        ...item,
+        code: "",
+        rationale: "Sugerencia preliminar derivada del análisis; confirmar catálogo y cantidad.",
+        catalogMatch: "verify",
+      })),
+    });
     const inputTokens = response.usageMetadata?.promptTokenCount ?? 0;
     const outputTokens =
       (response.usageMetadata?.candidatesTokenCount ?? 0) +
