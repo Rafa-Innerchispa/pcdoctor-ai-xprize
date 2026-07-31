@@ -86,6 +86,15 @@ Recommended collections:
 - `propertySystems`
 - `propertyIssues`
 - `propertyCommitments`
+- `tenantOperationalSettings`
+- `inspections`
+- `quotes`
+- `deliveryDrafts`
+
+Inspection requests accept bounded inline evidence for controlled analysis.
+Structured findings and quotes persist. Raw test binaries remain session-local
+until the private Cloud Storage evidence-vault design, retention policy, and
+authorized download path are completed.
 
 ### WhatsApp
 

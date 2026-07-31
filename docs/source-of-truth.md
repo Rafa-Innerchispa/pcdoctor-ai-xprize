@@ -60,6 +60,11 @@ Initial release:
 - billing work queue, not tax invoice issuance;
 - SERVIFRAN managed-property portfolio, critical-system inventory, issues,
   commitments, and grounded brief;
+- guarded multimodal technical inspection drafts from voice, photos, PDF, Word,
+  or text;
+- sober printable technical reports and itemized quote drafts with tenant-level
+  branding, configurable VAT, and deterministic totals;
+- approval-bound email and WhatsApp delivery drafts, without automatic send;
 - executive dashboard and evidence mode;
 - Google Cloud deployment blueprint.
 

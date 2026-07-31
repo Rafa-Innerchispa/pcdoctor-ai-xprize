@@ -1,8 +1,11 @@
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
+import * as mammoth from "mammoth";
 import {
   caseAnalysisSchema,
+  inspectionAnalysisSchema,
   type AnalyzeCaseRequest,
   type CaseAnalysis,
+  type InspectionAnalysis,
 } from "@fieldspark/contracts";
 import type { AppConfig } from "./config.js";
 
@@ -37,6 +40,70 @@ const caseAnalysisJsonSchema = {
     nextBestAction: { type: "string" },
     draftReply: { type: "string" },
     requiresHumanApproval: { type: "boolean" },
+    confidence: { type: "number", minimum: 0, maximum: 1 },
+  },
+} as const;
+
+const inspectionAnalysisJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "executiveSummary",
+    "technicalContext",
+    "findings",
+    "measurements",
+    "recommendedActions",
+    "suggestedItems",
+    "missingInformation",
+    "safetyLimitations",
+    "confidence",
+  ],
+  properties: {
+    executiveSummary: { type: "string" },
+    technicalContext: { type: "string" },
+    findings: {
+      type: "array",
+      maxItems: 20,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["title", "detail", "severity", "evidenceIds", "confidence"],
+        properties: {
+          title: { type: "string" },
+          detail: { type: "string" },
+          severity: {
+            type: "string",
+            enum: ["observation", "attention", "critical"],
+          },
+          evidenceIds: { type: "array", items: { type: "string" } },
+          confidence: { type: "number", minimum: 0, maximum: 1 },
+        },
+      },
+    },
+    measurements: { type: "array", items: { type: "string" } },
+    recommendedActions: { type: "array", items: { type: "string" } },
+    suggestedItems: {
+      type: "array",
+      maxItems: 30,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["code", "description", "quantity", "unit", "rationale", "catalogMatch"],
+        properties: {
+          code: { type: "string" },
+          description: { type: "string" },
+          quantity: { type: "number" },
+          unit: { type: "string" },
+          rationale: { type: "string" },
+          catalogMatch: {
+            type: "string",
+            enum: ["existing", "new", "verify"],
+          },
+        },
+      },
+    },
+    missingInformation: { type: "array", items: { type: "string" } },
+    safetyLimitations: { type: "array", items: { type: "string" } },
     confidence: { type: "number", minimum: 0, maximum: 1 },
   },
 } as const;
@@ -158,5 +225,122 @@ export class GeminiService {
     }
 
     throw lastValidationError ?? new Error("gemini_response_validation_failed");
+  }
+
+  async analyzeInspection(input: {
+    systemType: string;
+    title: string;
+    siteName: string;
+    narrative: string;
+    evidence: Array<{
+      id: string;
+      kind: string;
+      fileName: string;
+      mimeType: string;
+      dataBase64: string;
+    }>;
+  }): Promise<{
+    analysis: InspectionAnalysis;
+    requestReference: string | null;
+    inputTokens: number;
+    outputTokens: number;
+    estimatedCostUsd: number;
+  }> {
+    if (this.config.GEMINI_PROVIDER === "developer" && !this.config.GEMINI_API_KEY) {
+      throw new Error("GEMINI_API_KEY is required for Gemini Developer API.");
+    }
+    const ai =
+      this.config.GEMINI_PROVIDER === "developer"
+        ? new GoogleGenAI({ apiKey: this.config.GEMINI_API_KEY })
+        : new GoogleGenAI({
+            vertexai: true,
+            project: this.config.GOOGLE_CLOUD_PROJECT,
+            location: this.config.GOOGLE_CLOUD_LOCATION,
+            apiVersion: "v1",
+          });
+    const mediaParts = await Promise.all(
+      input.evidence.map(async (item) => {
+        if (
+          item.mimeType ===
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ) {
+          const extracted = await mammoth.extractRawText({
+            buffer: Buffer.from(item.dataBase64, "base64"),
+          });
+          return {
+            text: `Documento Word ${item.id} (${item.fileName}):\n${extracted.value}`,
+          };
+        }
+        if (item.mimeType.startsWith("text/")) {
+          return {
+            text: `Documento de texto ${item.id} (${item.fileName}):\n${Buffer.from(item.dataBase64, "base64").toString("utf8")}`,
+          };
+        }
+        return {
+          inlineData: { mimeType: item.mimeType, data: item.dataBase64 },
+        };
+      }),
+    );
+    const parts: Array<
+      | { text: string }
+      | { inlineData: { mimeType: string; data: string } }
+    > = [
+      {
+        text: JSON.stringify({
+          systemType: input.systemType,
+          title: input.title,
+          siteName: input.siteName,
+          technicianNarrative: input.narrative,
+          evidenceIndex: input.evidence.map(({ id, kind, fileName, mimeType }) => ({
+            id,
+            kind,
+            fileName,
+            mimeType,
+          })),
+        }),
+      },
+      ...mediaParts,
+    ];
+    const response = await ai.models.generateContent({
+      model: this.config.GEMINI_MODEL,
+      contents: [{ role: "user", parts }],
+      config: {
+        responseMimeType: "application/json",
+        responseJsonSchema: inspectionAnalysisJsonSchema,
+        systemInstruction:
+          "You are FieldSpark's technical inspection assistant. Analyze only the supplied narration and evidence. " +
+          "Separate observed facts from hypotheses, never declare a safety-critical system compliant from photos alone, " +
+          "ask for missing measurements, and propose catalog items without inventing prices or availability. " +
+          "Use evidence IDs exactly as supplied. Return only the required JSON object in Spanish.",
+        maxOutputTokens: this.config.GEMINI_MAX_OUTPUT_TOKENS,
+        thinkingConfig: {
+          thinkingLevel: {
+            minimal: ThinkingLevel.MINIMAL,
+            low: ThinkingLevel.LOW,
+            medium: ThinkingLevel.MEDIUM,
+            high: ThinkingLevel.HIGH,
+          }[this.config.GEMINI_THINKING_LEVEL],
+        },
+      },
+    });
+    const analysis = inspectionAnalysisSchema.parse(
+      parseJsonResponse(response.text ?? "{}"),
+    );
+    const inputTokens = response.usageMetadata?.promptTokenCount ?? 0;
+    const outputTokens =
+      (response.usageMetadata?.candidatesTokenCount ?? 0) +
+      (response.usageMetadata?.thoughtsTokenCount ?? 0);
+    return {
+      analysis,
+      requestReference: response.responseId ?? null,
+      inputTokens,
+      outputTokens,
+      estimatedCostUsd: estimateGeminiCostUsd({
+        inputTokens,
+        outputTokens,
+        inputUsdPerMillion: this.config.GEMINI_INPUT_USD_PER_MILLION,
+        outputUsdPerMillion: this.config.GEMINI_OUTPUT_USD_PER_MILLION,
+      }),
+    };
   }
 }
