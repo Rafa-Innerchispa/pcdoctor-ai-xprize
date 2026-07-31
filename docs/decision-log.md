@@ -12,3 +12,5 @@
 | 2026-07-29 | gallery/archive work moves to Phase 2 | ADR-008 |
 | 2026-07-29 | use React/Vite static web instead of Next.js for the foundation | ADR-009 |
 | 2026-07-30 | add SERVIFRAN with isolated property workspaces and a central portfolio brief | ADR-010 |
+| 2026-07-30 | use prepaid Gemini for controlled measurement with a USD 5 project cap | ADR-011 |
+| 2026-07-31 | add a guarded multimodal inspection-to-quote vertical slice | ADR-012 |

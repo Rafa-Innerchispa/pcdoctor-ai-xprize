@@ -12,6 +12,7 @@ import {
   loadPlaybooks,
   transitionBusinessCase,
 } from "../api";
+import { InspectionWorkspace } from "./inspection-workspace";
 
 const statusLabels: Record<BusinessCase["status"], string> = {
   open: "En preparación",
@@ -290,6 +291,16 @@ export function CasesPanel({
                 );
               })}
             </div>
+            {(tenant.playbook === "pcdoctor" ||
+              tenant.playbook === "condominium_management" ||
+              tenant.playbook === "iapro") &&
+            currentCase.currentStage !== "intake" ? (
+              <InspectionWorkspace
+                tenant={tenant}
+                actor={actor}
+                businessCase={currentCase}
+              />
+            ) : null}
             <div className="case-controls">
               {currentCase.currentStage === "identity" ? (
                 <label>

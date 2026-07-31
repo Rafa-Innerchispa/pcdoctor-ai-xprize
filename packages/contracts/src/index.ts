@@ -74,7 +74,12 @@ export const analyzeCaseRequestSchema = z.object({
   tenantId: z.string().min(2).max(80),
   customerId: z.string().min(2).max(80),
   caseId: z.string().min(2).max(80),
-  playbook: z.enum(["photography_studio", "iapro"]),
+  playbook: z.enum([
+    "pcdoctor",
+    "iapro",
+    "photography_studio",
+    "condominium_management",
+  ]),
   message: z.string().min(5).max(12_000),
   channel: z.enum(["whatsapp", "form", "audio_transcript", "spreadsheet"]),
 });
@@ -297,6 +302,47 @@ export const memberUpdateSchema = z.object({
   permissions: z.array(fieldSparkPermissionSchema),
   status: z.enum(["active", "suspended"]),
 });
+
+export const customerContactImportRowSchema = z
+  .object({
+    displayName: z.string().trim().min(2).max(120),
+    accountName: z.string().trim().max(160).default(""),
+    phone: z.string().trim().max(30).default(""),
+    email: z.union([z.string().trim().email(), z.literal("")]).default(""),
+    taxId: z.string().trim().max(20).default(""),
+    notes: z.string().trim().max(1_000).default(""),
+  })
+  .refine((row) => Boolean(row.phone || row.email), {
+    message: "Cada contacto debe incluir teléfono o correo.",
+    path: ["phone"],
+  });
+
+export const customerContactImportRequestSchema = z
+  .object({
+    fileName: z.string().trim().min(1).max(180),
+    synthetic: z.boolean().default(true),
+    consentConfirmed: z.boolean().default(false),
+    rows: z.array(customerContactImportRowSchema).min(1).max(2_000),
+  })
+  .refine((request) => request.synthetic || request.consentConfirmed, {
+    message: "Confirma la autorización antes de importar datos reales.",
+    path: ["consentConfirmed"],
+  });
+
+export const customerContactSchema = customerContactImportRowSchema.extend({
+  id: z.string().uuid(),
+  tenantId: z.string().min(3).max(80),
+  source: z.literal("spreadsheet"),
+  sourceFileName: z.string().min(1).max(180),
+  synthetic: z.boolean(),
+  consentStatus: z.enum(["confirmed", "not_applicable_synthetic"]),
+  outboundAllowed: z.literal(false),
+  createdBy: z.string().min(3).max(160),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+export type CustomerContact = z.infer<typeof customerContactSchema>;
 
 export const sessionSchema = z.object({
   user: userProfileSchema,
@@ -654,3 +700,220 @@ export const propertyPortfolioBriefSchema = z.object({
 export type PropertyPortfolioBrief = z.infer<
   typeof propertyPortfolioBriefSchema
 >;
+
+export const inspectionEvidenceKinds = [
+  "photo",
+  "audio",
+  "document",
+  "text",
+] as const;
+
+export const inspectionEvidenceInputSchema = z.object({
+  id: z.string().uuid(),
+  kind: z.enum(inspectionEvidenceKinds),
+  fileName: z.string().trim().min(1).max(180),
+  mimeType: z.string().trim().min(3).max(120),
+  sizeBytes: z.number().int().nonnegative().max(8_000_000),
+  dataBase64: z.string().max(11_000_000),
+});
+
+export const inspectionFindingSchema = z.object({
+  title: z.string().min(3).max(180),
+  detail: z.string().min(3).max(2_000),
+  severity: z.enum(["observation", "attention", "critical"]),
+  evidenceIds: z.array(z.string().uuid()).max(12),
+  confidence: z.number().min(0).max(1),
+});
+
+export const inspectionSuggestedItemSchema = z.object({
+  code: z.string().max(60),
+  description: z.string().min(3).max(300),
+  quantity: z.number().positive().max(100_000),
+  unit: z.string().min(1).max(30),
+  rationale: z.string().min(3).max(500),
+  catalogMatch: z.enum(["existing", "new", "verify"]),
+});
+
+export const inspectionAnalysisSchema = z.object({
+  executiveSummary: z.string().min(20).max(4_000),
+  technicalContext: z.string().min(10).max(4_000),
+  findings: z.array(inspectionFindingSchema).max(20),
+  measurements: z.array(z.string().max(300)).max(20),
+  recommendedActions: z.array(z.string().max(500)).max(20),
+  suggestedItems: z.array(inspectionSuggestedItemSchema).max(30),
+  missingInformation: z.array(z.string().max(300)).max(20),
+  safetyLimitations: z.array(z.string().max(500)).max(12),
+  confidence: z.number().min(0).max(1),
+});
+
+export type InspectionAnalysis = z.infer<typeof inspectionAnalysisSchema>;
+
+export const inspectionAnalyzeRequestSchema = z
+  .object({
+    systemType: z.enum(propertySystemTypes),
+    title: z.string().trim().min(3).max(180),
+    siteName: z.string().trim().min(2).max(180),
+    narrative: z.string().trim().max(20_000).default(""),
+    evidence: z.array(inspectionEvidenceInputSchema).max(20).default([]),
+    synthetic: z.boolean().default(false),
+  })
+  .superRefine((value, context) => {
+    if (value.narrative.length < 5 && value.evidence.length === 0) {
+      context.addIssue({
+        code: "custom",
+        path: ["narrative"],
+        message: "Provide a narration or at least one evidence file.",
+      });
+    }
+    const totalBytes = value.evidence.reduce(
+      (sum, item) => sum + item.sizeBytes,
+      0,
+    );
+    if (totalBytes > 16_000_000) {
+      context.addIssue({
+        code: "custom",
+        path: ["evidence"],
+        message: "Evidence exceeds the 16 MB request limit.",
+      });
+    }
+  });
+
+export const inspectionRecordSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().min(3).max(80),
+  caseId: z.string().min(3).max(100),
+  systemType: z.enum(propertySystemTypes),
+  title: z.string().min(3).max(180),
+  siteName: z.string().min(2).max(180),
+  narrative: z.string().max(20_000),
+  evidence: z.array(
+    inspectionEvidenceInputSchema.omit({ dataBase64: true }),
+  ),
+  analysis: inspectionAnalysisSchema,
+  status: z.enum(["draft", "reviewed"]),
+  synthetic: z.boolean(),
+  createdBy: z.string().min(3).max(160),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+export type InspectionRecord = z.infer<typeof inspectionRecordSchema>;
+
+export const tenantOperationalSettingsUpdateSchema = z.object({
+  defaultTaxRatePct: z.number().min(0).max(100).default(15),
+  currency: z.literal("USD").default("USD"),
+  quoteValidityDays: z.number().int().min(1).max(365).default(15),
+  paymentTerms: z.string().trim().max(1_000).default(""),
+  warrantyTerms: z.string().trim().max(1_000).default(""),
+  branding: z.object({
+    legalName: z.string().trim().max(180).default(""),
+    taxId: z.string().trim().max(20).default(""),
+    address: z.string().trim().max(240).default(""),
+    email: z.union([z.literal(""), z.string().email()]).default(""),
+    phone: z.string().trim().max(30).default(""),
+    primaryColor: z
+      .string()
+      .regex(/^#[0-9a-fA-F]{6}$/)
+      .default("#183d34"),
+    logoDataUrl: z
+      .string()
+      .max(500_000)
+      .refine(
+        (value) => value === "" || /^data:image\/(png|jpeg|webp);base64,/.test(value),
+        "Logo must be a PNG, JPEG, or WEBP data URL.",
+      )
+      .default(""),
+  }),
+  monthlyLimits: z.object({
+    inspections: z.number().int().min(1).max(10_000).default(20),
+    photosPerInspection: z.number().int().min(1).max(100).default(20),
+    audioMinutesPerInspection: z.number().int().min(1).max(600).default(15),
+    documentPagesPerInspection: z.number().int().min(1).max(1_000).default(25),
+    supplierSearchesPerInspection: z.number().int().min(0).max(100).default(2),
+    evidenceStorageMb: z.number().int().min(10).max(1_000_000).default(512),
+  }),
+});
+
+export const tenantOperationalSettingsSchema =
+  tenantOperationalSettingsUpdateSchema.extend({
+    tenantId: z.string().min(3).max(80),
+    updatedBy: z.string().min(3).max(160),
+    updatedAt: z.string().datetime(),
+  });
+
+export type TenantOperationalSettings = z.infer<
+  typeof tenantOperationalSettingsSchema
+>;
+
+export const quoteLineInputSchema = z.object({
+  code: z.string().trim().max(60).default(""),
+  description: z.string().trim().min(3).max(500),
+  quantity: z.number().positive().max(100_000),
+  unit: z.string().trim().min(1).max(30),
+  unitPriceUsd: z.number().nonnegative().max(100_000_000),
+});
+
+export const quoteLineSchema = quoteLineInputSchema.extend({
+  subtotalUsd: z.number().nonnegative(),
+});
+
+export const quoteDraftCreateSchema = z.object({
+  inspectionId: z.string().uuid(),
+  proposalTitle: z.string().trim().min(3).max(180),
+  executiveSummary: z.string().trim().min(20).max(8_000),
+  technicalProposal: z.string().trim().min(20).max(8_000),
+  scope: z.array(z.string().trim().min(3).max(500)).max(30),
+  exclusions: z.array(z.string().trim().min(3).max(500)).max(20),
+  items: z.array(quoteLineInputSchema).min(1).max(100),
+  taxRatePct: z.number().min(0).max(100).optional(),
+  validityDays: z.number().int().min(1).max(365).optional(),
+});
+
+export const quoteDocumentSchema = z.object({
+  id: z.string().uuid(),
+  quoteNumber: z.string().min(3).max(60),
+  tenantId: z.string().min(3).max(80),
+  caseId: z.string().min(3).max(100),
+  inspectionId: z.string().uuid(),
+  customerName: z.string().min(2).max(180),
+  customerIdentifier: z.string().max(20),
+  proposalTitle: z.string().min(3).max(180),
+  executiveSummary: z.string().min(20).max(8_000),
+  technicalProposal: z.string().min(20).max(8_000),
+  scope: z.array(z.string().max(500)),
+  exclusions: z.array(z.string().max(500)),
+  items: z.array(quoteLineSchema),
+  subtotalUsd: z.number().nonnegative(),
+  taxRatePct: z.number().min(0).max(100),
+  taxAmountUsd: z.number().nonnegative(),
+  totalUsd: z.number().nonnegative(),
+  currency: z.literal("USD"),
+  validityDays: z.number().int().positive(),
+  status: z.enum(["draft", "pending_approval", "approved"]),
+  outboundAllowed: z.literal(false),
+  createdBy: z.string().min(3).max(160),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+export type QuoteDocument = z.infer<typeof quoteDocumentSchema>;
+
+export const deliveryDraftCreateSchema = z.object({
+  quoteId: z.string().uuid(),
+  channel: z.enum(["email", "whatsapp"]),
+  recipient: z.string().trim().min(3).max(180),
+  subject: z.string().trim().max(180).default(""),
+  message: z.string().trim().min(10).max(4_000),
+});
+
+export const deliveryDraftSchema = deliveryDraftCreateSchema.extend({
+  id: z.string().uuid(),
+  tenantId: z.string().min(3).max(80),
+  caseId: z.string().min(3).max(100),
+  status: z.literal("awaiting_approval"),
+  sent: z.literal(false),
+  createdBy: z.string().min(3).max(160),
+  createdAt: z.string().datetime(),
+});
+
+export type DeliveryDraft = z.infer<typeof deliveryDraftSchema>;

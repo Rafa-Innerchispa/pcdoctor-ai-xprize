@@ -1,0 +1,75 @@
+{
+  "capturedAtUtc": "2026-07-31T02:38:04.8545515Z",
+  "environment": "gcp-staging",
+  "synthetic": true,
+  "deploymentRevision": "fieldspark-api-00030-g2z",
+  "codeCommit": "3a512e7",
+  "provider": "gemini-developer-api-prepaid",
+  "model": "gemini-3.5-flash-lite",
+  "projectMonthlySpendCapUsd": 5,
+  "automaticReloadEnabled": false,
+  "pricingUsdPerMillionTokens": {
+    "input": 0.3,
+    "outputIncludingThinking": 2.5
+  },
+  "requestControls": {
+    "maxOutputTokens": 1024,
+    "thinkingLevel": "minimal",
+    "responseJsonSchemaRequired": true,
+    "invalidStructuredResponseRetries": 1,
+    "outboundEnabled": false,
+    "invoicingEnabled": false
+  },
+  "meteredPrepaidSample": {
+    "requests": 15,
+    "inputTokens": 1622,
+    "outputTokens": 3018,
+    "estimatedListPriceCostUsd": 0.0080316,
+    "averageEstimatedCostPerRequestUsd": 0.00053544,
+    "projectedGeminiCostPer1000SimilarRequestsUsd": 0.53544
+  },
+  "byTenant": [
+    {
+      "tenantId": "pcdoctor-ec",
+      "requests": 5,
+      "inputTokens": 568,
+      "outputTokens": 1025,
+      "estimatedListPriceCostUsd": 0.0027329,
+      "averageDurationMs": 1154,
+      "projectedGeminiCostPer1000SimilarRequestsUsd": 0.54658
+    },
+    {
+      "tenantId": "iapro-ec",
+      "requests": 5,
+      "inputTokens": 553,
+      "outputTokens": 1160,
+      "estimatedListPriceCostUsd": 0.0030659,
+      "averageDurationMs": 1096,
+      "projectedGeminiCostPer1000SimilarRequestsUsd": 0.61318
+    },
+    {
+      "tenantId": "studio-pilot",
+      "requests": 3,
+      "inputTokens": 307,
+      "outputTokens": 521,
+      "estimatedListPriceCostUsd": 0.0013946,
+      "averageDurationMs": 950,
+      "projectedGeminiCostPer1000SimilarRequestsUsd": 0.46486667
+    },
+    {
+      "tenantId": "servifran-pilot",
+      "requests": 2,
+      "inputTokens": 194,
+      "outputTokens": 312,
+      "estimatedListPriceCostUsd": 0.0008382,
+      "averageDurationMs": 967,
+      "projectedGeminiCostPer1000SimilarRequestsUsd": 0.4191
+    }
+  ],
+  "interpretation": [
+    "This is a small synthetic intake benchmark, not a production invoice or customer-usage claim.",
+    "The cost is calculated from returned billable-token metadata and configured public list prices.",
+    "AI Studio billing can take up to 24 hours to display the corresponding actual debit.",
+    "Subscription pricing must also include Cloud Run, Firestore, messaging, storage, support, tax, and margin."
+  ]
+}

@@ -21,8 +21,8 @@
 
 - [ ] golden evaluation set approved
 - [ ] precision/recall or task-specific quality threshold met
-- [ ] prompt/model version recorded
-- [ ] cost and latency limits configured
+- [x] prompt/model version recorded
+- [x] cost and latency limits configured
 - [ ] fallbacks and retries tested
 - [ ] human approval cannot be bypassed
 
@@ -44,7 +44,7 @@
 ## Evidence
 
 - [ ] environment labels visible
-- [ ] first real Gemini call captured
+- [x] first real Gemini call captured
 - [ ] customer consent for judging captured
 - [ ] invoice/payment evidence reconciled
 - [ ] public evidence redacted by two-person review

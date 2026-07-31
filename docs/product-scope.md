@@ -25,10 +25,13 @@ The CRM-shaped screens are the control surface, not the product's intelligence.
 
 | Capability | AI responsibility | Human responsibility |
 |---|---|---|
+| Customer onboarding | normalize a reviewed CSV, TSV, or text contact list and flag incomplete or duplicate entries | choose whether to start empty; confirm consent before importing real contacts |
 | Intake | classify intent, urgency, service and gaps | correct unusual classifications |
 | Discovery | select questions from the tenant playbook | approve sensitive questions |
 | Continuity | detect stale opportunities and propose next action | approve outbound contact |
 | Scoping | organize findings and draft scope | validate commitments and pricing |
+| Technical inspection | structure voice, photo and document evidence; expose uncertainty and missing measurements | validate findings, safety, quantities and completion |
+| Commercial document | draft the explanatory proposal and itemized quote | set unit prices, tax applicability and approve the document |
 | Billing queue | identify completed billable work | issue legal invoice |
 | Evidence | log model, decision, latency and approval state | confirm/redact exports |
 

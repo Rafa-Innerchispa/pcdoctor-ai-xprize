@@ -9,9 +9,9 @@
 - [x] infrastructure and CI/CD blueprints
 - [ ] make repository private or explicitly accept public exposure
 - [ ] confirm GCP credits: scope, balance, expiry
-- [ ] provision GCP staging
-- [ ] deploy web and API
-- [ ] execute and evidence first real Gemini call
+- [x] provision GCP staging
+- [x] deploy web and API
+- [x] execute and evidence first real Gemini call
 - [ ] configure billing export and budget alerts
 - [ ] create judge-safe demo credentials
 

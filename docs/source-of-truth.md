@@ -51,6 +51,8 @@ evidence exists.
 
 Initial release:
 
+- optional consent-gated contact import from CSV, TSV, or delimited text, with
+  a supported path to start from an empty workspace;
 - intake from normalized message or transcript;
 - customer and opportunity continuity;
 - Gemini classification and next-action recommendation;
@@ -60,6 +62,11 @@ Initial release:
 - billing work queue, not tax invoice issuance;
 - SERVIFRAN managed-property portfolio, critical-system inventory, issues,
   commitments, and grounded brief;
+- guarded multimodal technical inspection drafts from voice, photos, PDF, Word,
+  or text;
+- sober printable technical reports and itemized quote drafts with tenant-level
+  branding, configurable VAT, and deterministic totals;
+- approval-bound email and WhatsApp delivery drafts, without automatic send;
 - executive dashboard and evidence mode;
 - Google Cloud deployment blueprint.
 
@@ -97,7 +104,11 @@ Potential initial contracted value: USD 868. This is a projection, not revenue.
 - Local development and testing are allowed.
 - Production runtime must be Google Cloud, not an unreliable local server.
 - Web and API deploy to Cloud Run.
-- Gemini is called server-side through Vertex AI using `@google/genai`.
+- Gemini is called server-side through a provider adapter using `@google/genai`.
+  Controlled staging uses the Gemini Developer API prepaid plan so usage stops
+  when prepaid funds or the project cap are exhausted. Vertex AI through
+  Application Default Credentials remains supported for later production use
+  when its billing source is explicitly approved.
 - Firestore stores operational records and audit events.
 - Evolution API, PostgreSQL, and Redis run on a dedicated Compute Engine VM when
   approved; local Evolution instances are not production dependencies.

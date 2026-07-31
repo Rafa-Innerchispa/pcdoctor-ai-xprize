@@ -7,9 +7,15 @@ import {
   businessCaseCreateSchema,
   businessCaseSchema,
   caseTransitionRequestSchema,
+  customerContactImportRequestSchema,
+  customerContactSchema,
+  deliveryDraftCreateSchema,
+  deliveryDraftSchema,
   ecIdentityValidationRequestSchema,
   invitationCreateSchema,
   invitationSchema,
+  inspectionAnalyzeRequestSchema,
+  inspectionRecordSchema,
   memberUpdateSchema,
   membershipSchema,
   managedPropertyCreateSchema,
@@ -22,6 +28,9 @@ import {
   propertyPortfolioBriefSchema,
   propertySystemCreateSchema,
   propertySystemSchema,
+  quoteDraftCreateSchema,
+  tenantOperationalSettingsSchema,
+  tenantOperationalSettingsUpdateSchema,
   demoDraftUpdateSchema,
   demoWorkflowSchema,
   syntheticContacts,
@@ -29,6 +38,7 @@ import {
   type AnalyzeCaseRequest,
   type AuditEvent,
   type BusinessCase,
+  type CustomerContact,
   type DemoWorkflow,
   type FieldSparkPermission,
   type SyntheticContact,
@@ -44,6 +54,7 @@ import {
 } from "./auth.js";
 import { contactsToCsv } from "./contact-csv.js";
 import { createContactStore } from "./contact-store.js";
+import { createCustomerStore } from "./customer-store.js";
 import { createCaseStore } from "./case-store.js";
 import {
   playbookDefinitions,
@@ -68,6 +79,11 @@ import {
 } from "./identity-service.js";
 import { createIdentityStore } from "./identity-store.js";
 import { createPortfolioStore } from "./portfolio-store.js";
+import { createOperationsStore } from "./operations-store.js";
+import {
+  buildQuoteDocument,
+  buildSyntheticInspectionAnalysis,
+} from "./inspection-workflow.js";
 import { redactSensitiveText } from "./redact.js";
 import { createWorkflowStore } from "./workflow-store.js";
 
@@ -97,13 +113,16 @@ export async function buildApp(
       redact: ["req.headers.authorization", "req.headers.x-admin-key"],
     },
     requestIdHeader: "x-request-id",
+    bodyLimit: 25_000_000,
   });
   const eventStore = createEventStore(config);
   const contactStore = createContactStore(config);
+  const customerStore = createCustomerStore(config);
   const caseStore = createCaseStore(config);
   const workflowStore = createWorkflowStore(config);
   const identityStore = createIdentityStore(config);
   const portfolioStore = createPortfolioStore(config);
+  const operationsStore = createOperationsStore(config);
   const authVerifier =
     dependencies.authVerifier === undefined
       ? createAuthVerifier(config)
@@ -738,6 +757,116 @@ export async function buildApp(
     return event;
   }
 
+  function customerKeys(customer: {
+    taxId: string;
+    phone: string;
+    email: string;
+  }) {
+    return [
+      customer.taxId ? `tax:${customer.taxId.replace(/\D/g, "")}` : "",
+      customer.phone ? `phone:${customer.phone.replace(/\D/g, "")}` : "",
+      customer.email ? `email:${customer.email.trim().toLowerCase()}` : "",
+    ].filter((value) => !value.endsWith(":"));
+  }
+
+  app.get("/v1/tenants/:tenantId/customers", async (request, reply) => {
+    const tenantId = routeParam(request, "tenantId");
+    const membership = await tenantMembership(request, tenantId);
+    if (!membership || !hasPermission(membership, "customers.view")) {
+      return reply.code(403).send({ error: "customer_view_forbidden" });
+    }
+    const customers = await customerStore.list(tenantId);
+    return { customers, total: customers.length };
+  });
+
+  app.post(
+    "/v1/tenants/:tenantId/customers/import",
+    async (request, reply) => {
+      const identity = requireIdentity(request);
+      const tenantId = routeParam(request, "tenantId");
+      const membership = await tenantMembership(request, tenantId);
+      if (!membership || !hasPermission(membership, "customers.manage")) {
+        return reply.code(403).send({ error: "customer_import_forbidden" });
+      }
+      const parsed = customerContactImportRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: "invalid_customer_import",
+          details: parsed.error.flatten(),
+        });
+      }
+
+      const existing = await customerStore.list(tenantId);
+      const knownKeys = new Set(existing.flatMap(customerKeys));
+      const now = new Date().toISOString();
+      const customers: CustomerContact[] = [];
+      let duplicates = 0;
+      for (const row of parsed.data.rows) {
+        const keys = customerKeys(row);
+        if (keys.some((key) => knownKeys.has(key))) {
+          duplicates += 1;
+          continue;
+        }
+        keys.forEach((key) => knownKeys.add(key));
+        customers.push(
+          customerContactSchema.parse({
+            ...row,
+            id: randomUUID(),
+            tenantId,
+            source: "spreadsheet",
+            sourceFileName: parsed.data.fileName,
+            synthetic: parsed.data.synthetic,
+            consentStatus: parsed.data.synthetic
+              ? "not_applicable_synthetic"
+              : "confirmed",
+            outboundAllowed: false,
+            createdBy: identity.uid,
+            createdAt: now,
+            updatedAt: now,
+          }),
+        );
+      }
+      await customerStore.upsertMany(customers);
+
+      const event = auditEventSchema.parse({
+        timestamp: now,
+        eventId: randomUUID(),
+        eventName: "contact_import_completed",
+        tenantId,
+        customerId: null,
+        caseId: null,
+        agentId: identity.uid,
+        actorType: "human",
+        action: "import_customer_contacts",
+        inputSummary: `${parsed.data.rows.length} filas desde ${redactSensitiveText(parsed.data.fileName).slice(0, 120)}; ${parsed.data.synthetic ? "datos de prueba" : "autorización confirmada"}`,
+        decision: "Guardar en el entorno aislado de la empresa y mantener todo contacto saliente bloqueado.",
+        result: `${customers.length} contactos importados; ${duplicates} duplicados omitidos.`,
+        model: null,
+        requestReference: request.id,
+        inputTokens: null,
+        outputTokens: null,
+        estimatedCostUsd: null,
+        humanApproval: "approved",
+        durationMs: 0,
+        status: "completed",
+        error: null,
+        evidenceVersion: "1.0",
+      });
+      await eventStore.append(event);
+      request.log.info(
+        { auditEvent: event },
+        "customer contact import completed",
+      );
+      return reply.code(201).send({
+        imported: customers.length,
+        duplicates,
+        total: existing.length + customers.length,
+        outboundAllowed: false,
+        customers,
+      });
+    },
+  );
+
   app.get("/v1/tenants/:tenantId/cases", async (request, reply) => {
     const identity = requireIdentity(request);
     const tenantId = routeParam(request, "tenantId");
@@ -1046,6 +1175,311 @@ export async function buildApp(
       });
       await identityStore.upsertMembership(membership);
       return { membership };
+    },
+  );
+
+  async function getOperationalSettings(tenantId: string, userId: string) {
+    const existing = await operationsStore.getSettings(tenantId);
+    if (existing) return existing;
+    const tenant = await identityStore.getTenant(tenantId);
+    if (!tenant) return undefined;
+    const settings = tenantOperationalSettingsSchema.parse({
+      tenantId,
+      defaultTaxRatePct: 15,
+      currency: "USD",
+      quoteValidityDays: 15,
+      paymentTerms: "Forma de pago sujeta a aprobación comercial.",
+      warrantyTerms: "Garantía aplicable según equipos, alcance y condiciones aprobadas.",
+      branding: {
+        legalName: tenant.legalName,
+        taxId: "",
+        address: "",
+        email: "",
+        phone: "",
+        primaryColor: "#183d34",
+        logoDataUrl: "",
+      },
+      monthlyLimits: {
+        inspections: 20,
+        photosPerInspection: 20,
+        audioMinutesPerInspection: 15,
+        documentPagesPerInspection: 25,
+        supplierSearchesPerInspection: 2,
+        evidenceStorageMb: 512,
+      },
+      updatedBy: userId,
+      updatedAt: new Date().toISOString(),
+    });
+    await operationsStore.upsertSettings(settings);
+    return settings;
+  }
+
+  app.get("/v1/tenants/:tenantId/operational-settings", async (request, reply) => {
+    const identity = requireIdentity(request);
+    const tenantId = routeParam(request, "tenantId");
+    const membership = await tenantMembership(request, tenantId);
+    if (!membership || !hasPermission(membership, "quotes.view")) {
+      return reply.code(403).send({ error: "settings_view_forbidden" });
+    }
+    const settings = await getOperationalSettings(tenantId, identity.uid);
+    if (!settings) return reply.code(404).send({ error: "tenant_not_found" });
+    const monthPrefix = new Date().toISOString().slice(0, 7);
+    const inspections = (await operationsStore.listInspections(tenantId)).filter(
+      (inspection) => inspection.createdAt.startsWith(monthPrefix),
+    );
+    return {
+      settings,
+      usage: {
+        month: monthPrefix,
+        inspections: inspections.length,
+        inspectionLimit: settings.monthlyLimits.inspections,
+      },
+    };
+  });
+
+  app.put("/v1/tenants/:tenantId/operational-settings", async (request, reply) => {
+    const identity = requireIdentity(request);
+    const tenantId = routeParam(request, "tenantId");
+    const membership = await tenantMembership(request, tenantId);
+    if (!membership || !hasPermission(membership, "tenant.manage")) {
+      return reply.code(403).send({ error: "settings_management_forbidden" });
+    }
+    const parsed = tenantOperationalSettingsUpdateSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: "invalid_operational_settings",
+        details: parsed.error.flatten(),
+      });
+    }
+    const settings = tenantOperationalSettingsSchema.parse({
+      ...parsed.data,
+      tenantId,
+      updatedBy: identity.uid,
+      updatedAt: new Date().toISOString(),
+    });
+    await operationsStore.upsertSettings(settings);
+    return { settings };
+  });
+
+  app.get(
+    "/v1/tenants/:tenantId/cases/:caseId/inspections",
+    async (request, reply) => {
+      const tenantId = routeParam(request, "tenantId");
+      const membership = await tenantMembership(request, tenantId);
+      if (!membership || !hasPermission(membership, "cases.view")) {
+        return reply.code(403).send({ error: "inspection_view_forbidden" });
+      }
+      const businessCase = await caseStore.get(routeParam(request, "caseId"));
+      if (!businessCase || businessCase.tenantId !== tenantId) {
+        return reply.code(404).send({ error: "case_not_found" });
+      }
+      return {
+        inspections: await operationsStore.listInspections(
+          tenantId,
+          businessCase.id,
+        ),
+        quotes: await operationsStore.listQuotes(tenantId, businessCase.id),
+      };
+    },
+  );
+
+  app.post(
+    "/v1/tenants/:tenantId/cases/:caseId/inspections/analyze",
+    async (request, reply) => {
+      const identity = requireIdentity(request);
+      const tenantId = routeParam(request, "tenantId");
+      const membership = await tenantMembership(request, tenantId);
+      if (!membership || !hasPermission(membership, "cases.manage")) {
+        return reply.code(403).send({ error: "inspection_management_forbidden" });
+      }
+      const businessCase = await caseStore.get(routeParam(request, "caseId"));
+      if (!businessCase || businessCase.tenantId !== tenantId) {
+        return reply.code(404).send({ error: "case_not_found" });
+      }
+      const parsed = inspectionAnalyzeRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: "invalid_inspection_request",
+          details: parsed.error.flatten(),
+        });
+      }
+      const settings = await getOperationalSettings(tenantId, identity.uid);
+      if (!settings) return reply.code(404).send({ error: "tenant_not_found" });
+      const photoCount = parsed.data.evidence.filter(
+        (item) => item.kind === "photo",
+      ).length;
+      if (photoCount > settings.monthlyLimits.photosPerInspection) {
+        return reply.code(429).send({ error: "inspection_photo_limit_exceeded" });
+      }
+      const monthPrefix = new Date().toISOString().slice(0, 7);
+      const monthlyCount = (await operationsStore.listInspections(tenantId)).filter(
+        (inspection) => inspection.createdAt.startsWith(monthPrefix),
+      ).length;
+      if (monthlyCount >= settings.monthlyLimits.inspections) {
+        return reply.code(429).send({ error: "monthly_inspection_limit_reached" });
+      }
+      const startedAt = Date.now();
+      try {
+        const result = config.DEMO_MODE
+          ? {
+              analysis: buildSyntheticInspectionAnalysis({
+                systemType: parsed.data.systemType,
+                narrative: parsed.data.narrative,
+                evidenceIds: parsed.data.evidence.map((item) => item.id),
+              }),
+              requestReference: `demo-inspection-${randomUUID()}`,
+              inputTokens: null,
+              outputTokens: null,
+              estimatedCostUsd: null,
+            }
+          : await gemini.analyzeInspection(parsed.data);
+        const now = new Date().toISOString();
+        const inspection = inspectionRecordSchema.parse({
+          id: randomUUID(),
+          tenantId,
+          caseId: businessCase.id,
+          systemType: parsed.data.systemType,
+          title: parsed.data.title,
+          siteName: parsed.data.siteName,
+          narrative: parsed.data.narrative,
+          evidence: parsed.data.evidence.map(({ dataBase64: _data, ...metadata }) => metadata),
+          analysis: result.analysis,
+          status: "draft",
+          synthetic: parsed.data.synthetic || config.DEMO_MODE,
+          createdBy: identity.uid,
+          createdAt: now,
+          updatedAt: now,
+        });
+        await operationsStore.upsertInspection(inspection);
+        const event = auditEventSchema.parse({
+          timestamp: now,
+          eventId: randomUUID(),
+          eventName: config.DEMO_MODE
+            ? "findings_structured"
+            : "gemini_analysis_completed",
+          tenantId,
+          customerId: businessCase.customerId,
+          caseId: businessCase.id,
+          agentId: "inspection-agent-v1",
+          actorType: "agent",
+          action: "analyze_multimodal_inspection",
+          inputSummary: redactSensitiveText(parsed.data.narrative).slice(0, 500),
+          decision: result.analysis.recommendedActions[0] ?? "Solicitar revisión técnica.",
+          result: result.analysis.executiveSummary,
+          model: config.DEMO_MODE ? "deterministic-demo" : config.GEMINI_MODEL,
+          requestReference: result.requestReference,
+          inputTokens: result.inputTokens,
+          outputTokens: result.outputTokens,
+          estimatedCostUsd: result.estimatedCostUsd,
+          humanApproval: "required",
+          durationMs: Date.now() - startedAt,
+          status: "completed",
+          error: null,
+          evidenceVersion: "1.0",
+        });
+        await eventStore.append(event);
+        return reply.code(201).send({ inspection, event });
+      } catch (error) {
+        request.log.error({ err: error }, "inspection analysis failed");
+        return reply.code(502).send({ error: "inspection_analysis_failed" });
+      }
+    },
+  );
+
+  app.post(
+    "/v1/tenants/:tenantId/cases/:caseId/quotes",
+    async (request, reply) => {
+      const identity = requireIdentity(request);
+      const tenantId = routeParam(request, "tenantId");
+      const membership = await tenantMembership(request, tenantId);
+      if (!membership || !hasPermission(membership, "quotes.manage")) {
+        return reply.code(403).send({ error: "quote_management_forbidden" });
+      }
+      const businessCase = await caseStore.get(routeParam(request, "caseId"));
+      if (!businessCase || businessCase.tenantId !== tenantId) {
+        return reply.code(404).send({ error: "case_not_found" });
+      }
+      const parsed = quoteDraftCreateSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: "invalid_quote", details: parsed.error.flatten() });
+      }
+      const inspection = await operationsStore.getInspection(parsed.data.inspectionId);
+      if (!inspection || inspection.tenantId !== tenantId || inspection.caseId !== businessCase.id) {
+        return reply.code(404).send({ error: "inspection_not_found" });
+      }
+      const settings = await getOperationalSettings(tenantId, identity.uid);
+      if (!settings) return reply.code(404).send({ error: "tenant_not_found" });
+      const existing = await operationsStore.listQuotes(tenantId);
+      const now = new Date().toISOString();
+      const quote = buildQuoteDocument({
+        id: randomUUID(),
+        sequence: existing.length + 1,
+        tenantId,
+        caseId: businessCase.id,
+        inspectionId: inspection.id,
+        customerName: businessCase.customerName,
+        customerIdentifier: businessCase.customerIdentifier,
+        createdBy: identity.uid,
+        now,
+        settings,
+        draft: parsed.data,
+      });
+      await operationsStore.upsertQuote(quote);
+      await appendCaseEvent(request, businessCase, {
+        eventName: "quote_generated",
+        actorType: "human",
+        action: "prepare_itemized_quote",
+        inputSummary: `${quote.items.length} líneas; IVA ${quote.taxRatePct}%`,
+        decision: "Solicitar aprobación humana antes de compartir.",
+        result: `${quote.quoteNumber} preparada por USD ${quote.totalUsd.toFixed(2)}.`,
+        humanApproval: "required",
+      });
+      return reply.code(201).send({ quote, settings });
+    },
+  );
+
+  app.post(
+    "/v1/tenants/:tenantId/cases/:caseId/delivery-drafts",
+    async (request, reply) => {
+      const identity = requireIdentity(request);
+      const tenantId = routeParam(request, "tenantId");
+      const membership = await tenantMembership(request, tenantId);
+      if (!membership || !hasPermission(membership, "messages.prepare")) {
+        return reply.code(403).send({ error: "message_preparation_forbidden" });
+      }
+      const businessCase = await caseStore.get(routeParam(request, "caseId"));
+      if (!businessCase || businessCase.tenantId !== tenantId) {
+        return reply.code(404).send({ error: "case_not_found" });
+      }
+      const parsed = deliveryDraftCreateSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: "invalid_delivery_draft", details: parsed.error.flatten() });
+      }
+      const quote = await operationsStore.getQuote(parsed.data.quoteId);
+      if (!quote || quote.tenantId !== tenantId || quote.caseId !== businessCase.id) {
+        return reply.code(404).send({ error: "quote_not_found" });
+      }
+      const draft = deliveryDraftSchema.parse({
+        ...parsed.data,
+        id: randomUUID(),
+        tenantId,
+        caseId: businessCase.id,
+        status: "awaiting_approval",
+        sent: false,
+        createdBy: identity.uid,
+        createdAt: new Date().toISOString(),
+      });
+      await operationsStore.upsertDeliveryDraft(draft);
+      await appendCaseEvent(request, businessCase, {
+        eventName: "human_approval_requested",
+        actorType: "human",
+        action: `prepare_${draft.channel}_draft`,
+        inputSummary: `${draft.channel}: ${draft.recipient}`,
+        decision: "Mantener el mensaje bloqueado hasta aprobación y habilitación del canal.",
+        result: "Borrador preparado; no se realizó ningún envío.",
+        humanApproval: "required",
+      });
+      return reply.code(201).send({ draft, outboundEnabled: config.OUTBOUND_ENABLED });
     },
   );
 
@@ -1496,6 +1930,86 @@ export async function buildApp(
     return { events: await eventStore.list(tenantId) };
   });
 
+  app.get("/v1/ai/usage", async (request, reply) => {
+    if (!requireAdmin(request, config)) {
+      return reply.code(401).send({ error: "admin_key_required" });
+    }
+    const tenantId =
+      typeof request.query === "object" &&
+      request.query &&
+      "tenantId" in request.query &&
+      typeof request.query.tenantId === "string"
+        ? request.query.tenantId
+        : undefined;
+    const events = (await eventStore.list(tenantId)).filter(
+      (event) => event.eventName === "gemini_analysis_completed",
+    );
+    const byTenant = new Map<
+      string,
+      {
+        requests: number;
+        inputTokens: number;
+        outputTokens: number;
+        estimatedCostUsd: number;
+        durationMs: number;
+      }
+    >();
+    for (const event of events) {
+      const aggregate = byTenant.get(event.tenantId) ?? {
+        requests: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        estimatedCostUsd: 0,
+        durationMs: 0,
+      };
+      aggregate.requests += 1;
+      aggregate.inputTokens += event.inputTokens ?? 0;
+      aggregate.outputTokens += event.outputTokens ?? 0;
+      aggregate.estimatedCostUsd += event.estimatedCostUsd ?? 0;
+      aggregate.durationMs += event.durationMs;
+      byTenant.set(event.tenantId, aggregate);
+    }
+    const tenants = [...byTenant.entries()].map(([id, aggregate]) => ({
+      tenantId: id,
+      requests: aggregate.requests,
+      inputTokens: aggregate.inputTokens,
+      outputTokens: aggregate.outputTokens,
+      estimatedCostUsd: Number(aggregate.estimatedCostUsd.toFixed(8)),
+      averageDurationMs:
+        aggregate.requests === 0
+          ? 0
+          : Math.round(aggregate.durationMs / aggregate.requests),
+    }));
+    return {
+      provider: config.GEMINI_PROVIDER,
+      model: config.GEMINI_MODEL,
+      pricingUsdPerMillionTokens: {
+        input: config.GEMINI_INPUT_USD_PER_MILLION,
+        output: config.GEMINI_OUTPUT_USD_PER_MILLION,
+      },
+      maxOutputTokensPerRequest: config.GEMINI_MAX_OUTPUT_TOKENS,
+      thinkingLevelPerRequest: config.GEMINI_THINKING_LEVEL,
+      sourceEventWindow: 100,
+      totals: {
+        requests: tenants.reduce((sum, tenant) => sum + tenant.requests, 0),
+        inputTokens: tenants.reduce(
+          (sum, tenant) => sum + tenant.inputTokens,
+          0,
+        ),
+        outputTokens: tenants.reduce(
+          (sum, tenant) => sum + tenant.outputTokens,
+          0,
+        ),
+        estimatedCostUsd: Number(
+          tenants
+            .reduce((sum, tenant) => sum + tenant.estimatedCostUsd, 0)
+            .toFixed(8),
+        ),
+      },
+      tenants,
+    };
+  });
+
   app.post("/v1/cases/analyze", async (request, reply) => {
     if (!config.DEMO_MODE && !requireAdmin(request, config)) {
       return reply.code(401).send({ error: "admin_key_required" });
@@ -1517,6 +2031,7 @@ export async function buildApp(
             requestReference: `demo-${randomUUID()}`,
             inputTokens: null,
             outputTokens: null,
+            estimatedCostUsd: null,
           }
         : await gemini.analyze(parsed.data);
 
@@ -1539,7 +2054,7 @@ export async function buildApp(
         requestReference: result.requestReference,
         inputTokens: result.inputTokens,
         outputTokens: result.outputTokens,
-        estimatedCostUsd: null,
+        estimatedCostUsd: result.estimatedCostUsd,
         humanApproval: result.analysis.requiresHumanApproval
           ? "required"
           : "not_required",

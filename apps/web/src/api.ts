@@ -1,12 +1,14 @@
 import type {
   BusinessCase,
   CaseTransitionRequest,
+  CustomerContact,
   DemoWorkflow,
   EcIdentityValidation,
   FieldSparkPermission,
   FieldSparkRole,
   FieldSparkSession,
   Invitation,
+  InspectionRecord,
   Membership,
   ManagedProperty,
   PlaybookDefinition,
@@ -14,7 +16,9 @@ import type {
   PropertyIssue,
   PropertyPortfolioBrief,
   PropertySystem,
+  QuoteDocument,
   SyntheticContact,
+  TenantOperationalSettings,
 } from "@fieldspark/contracts";
 import { getCurrentIdToken } from "./firebase";
 
@@ -108,6 +112,40 @@ export async function updateMember(
   );
 }
 
+export async function loadCustomers(tenantId: string) {
+  return apiRequest<{ customers: CustomerContact[]; total: number }>(
+    `/v1/tenants/${encodeURIComponent(tenantId)}/customers`,
+  );
+}
+
+export async function importCustomers(
+  tenantId: string,
+  input: {
+    fileName: string;
+    synthetic: boolean;
+    consentConfirmed: boolean;
+    rows: Array<{
+      displayName: string;
+      accountName: string;
+      phone: string;
+      email: string;
+      taxId: string;
+      notes: string;
+    }>;
+  },
+) {
+  return apiRequest<{
+    imported: number;
+    duplicates: number;
+    total: number;
+    outboundAllowed: false;
+    customers: CustomerContact[];
+  }>(`/v1/tenants/${encodeURIComponent(tenantId)}/customers/import`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
 export async function loadPlaybooks() {
   return apiRequest<{ playbooks: PlaybookDefinition[] }>("/v1/playbooks");
 }
@@ -157,6 +195,101 @@ export async function transitionBusinessCase(
 ) {
   return apiRequest<{ case: BusinessCase }>(
     `/v1/tenants/${encodeURIComponent(tenantId)}/cases/${encodeURIComponent(caseId)}/transitions`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
+}
+
+export async function loadOperationalSettings(tenantId: string) {
+  return apiRequest<{
+    settings: TenantOperationalSettings;
+    usage: { month: string; inspections: number; inspectionLimit: number };
+  }>(`/v1/tenants/${encodeURIComponent(tenantId)}/operational-settings`);
+}
+
+export async function updateOperationalSettings(
+  tenantId: string,
+  input: Omit<TenantOperationalSettings, "tenantId" | "updatedBy" | "updatedAt">,
+) {
+  return apiRequest<{ settings: TenantOperationalSettings }>(
+    `/v1/tenants/${encodeURIComponent(tenantId)}/operational-settings`,
+    { method: "PUT", body: JSON.stringify(input) },
+  );
+}
+
+export async function loadCaseOperations(tenantId: string, caseId: string) {
+  return apiRequest<{ inspections: InspectionRecord[]; quotes: QuoteDocument[] }>(
+    `/v1/tenants/${encodeURIComponent(tenantId)}/cases/${encodeURIComponent(caseId)}/inspections`,
+  );
+}
+
+export async function analyzeInspection(
+  tenantId: string,
+  caseId: string,
+  input: {
+    systemType: string;
+    title: string;
+    siteName: string;
+    narrative: string;
+    evidence: Array<{
+      id: string;
+      kind: "photo" | "audio" | "document" | "text";
+      fileName: string;
+      mimeType: string;
+      sizeBytes: number;
+      dataBase64: string;
+    }>;
+    synthetic: boolean;
+  },
+) {
+  return apiRequest<{ inspection: InspectionRecord }>(
+    `/v1/tenants/${encodeURIComponent(tenantId)}/cases/${encodeURIComponent(caseId)}/inspections/analyze`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
+}
+
+export async function createItemizedQuote(
+  tenantId: string,
+  caseId: string,
+  input: {
+    inspectionId: string;
+    proposalTitle: string;
+    executiveSummary: string;
+    technicalProposal: string;
+    scope: string[];
+    exclusions: string[];
+    items: Array<{
+      code: string;
+      description: string;
+      quantity: number;
+      unit: string;
+      unitPriceUsd: number;
+    }>;
+    taxRatePct?: number;
+    validityDays?: number;
+  },
+) {
+  return apiRequest<{ quote: QuoteDocument; settings: TenantOperationalSettings }>(
+    `/v1/tenants/${encodeURIComponent(tenantId)}/cases/${encodeURIComponent(caseId)}/quotes`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
+}
+
+export async function createDeliveryDraft(
+  tenantId: string,
+  caseId: string,
+  input: {
+    quoteId: string;
+    channel: "email" | "whatsapp";
+    recipient: string;
+    subject: string;
+    message: string;
+  },
+) {
+  return apiRequest<{
+    draft: { id: string; status: "awaiting_approval"; sent: false };
+    outboundEnabled: boolean;
+  }>(
+    `/v1/tenants/${encodeURIComponent(tenantId)}/cases/${encodeURIComponent(caseId)}/delivery-drafts`,
     { method: "POST", body: JSON.stringify(input) },
   );
 }

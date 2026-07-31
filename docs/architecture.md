@@ -7,7 +7,7 @@ flowchart LR
   U["Operator / judge"] --> W["React/Vite web · Cloud Run"]
   W --> A["Fastify API · Cloud Run"]
   C["WhatsApp / forms / spreadsheets"] --> A
-  A --> G["Gemini · Vertex AI"]
+  A --> G["Gemini · prepaid Developer API or Vertex AI"]
   A --> F["Firestore"]
   A --> L["Cloud Logging"]
   A --> S["Secret Manager"]
@@ -44,18 +44,34 @@ endpoints require an admin key outside demo mode.
 
 ### Gemini
 
-`@google/genai` is initialized with `vertexai: true`, project, location, and
-stable API version `v1`. Application Default Credentials are used. API keys are
-never exposed to the browser.
+`@google/genai` is behind a server-side provider adapter. The controlled
+staging environment uses a Gemini Developer API key restricted to
+`generativelanguage.googleapis.com`, stored in Secret Manager, and attached to
+an AI Studio prepaid billing plan. Vertex AI remains available through
+Application Default Credentials. API keys are never exposed to the browser or
+repository.
 
 The intake call returns structured business analysis. It is a decision-support
 step, not autonomous execution. Pricing and outbound text remain approval-bound.
+Every completed call records tenant, model, input/output tokens, estimated
+list-price cost, latency, request reference, and human-approval state.
+
+Staging has three cost controls:
+
+- AI Studio prepaid balance with automatic reload disabled;
+- a USD 5 monthly project spend cap;
+- bounded output and minimal thinking for routine intake extraction.
 
 ### Data
 
 Firestore is the first production operational store. Every collection document
 includes a tenant identifier. The current foundation implements the audit event
 store and a memory adapter for tests.
+
+The web onboarding flow can start with no imported data or can preview and
+submit a bounded CSV, TSV, or delimited text contact list. The API validates a
+maximum of 2,000 rows, deduplicates within the tenant, requires explicit consent
+for real contacts, and always creates them with outbound communication blocked.
 
 Recommended collections:
 
@@ -75,6 +91,15 @@ Recommended collections:
 - `propertySystems`
 - `propertyIssues`
 - `propertyCommitments`
+- `tenantOperationalSettings`
+- `inspections`
+- `quotes`
+- `deliveryDrafts`
+
+Inspection requests accept bounded inline evidence for controlled analysis.
+Structured findings and quotes persist. Raw test binaries remain session-local
+until the private Cloud Storage evidence-vault design, retention policy, and
+authorized download path are completed.
 
 ### WhatsApp
 

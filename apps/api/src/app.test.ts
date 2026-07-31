@@ -786,4 +786,237 @@ describe("FieldSpark API", () => {
     expect(forbiddenApproval.statusCode).toBe(403);
     expect(forbiddenApproval.json().error).toBe("quote_approval_forbidden");
   });
+
+  it("imports tenant-isolated customer contacts with consent and duplicate guards", async () => {
+    const app = await buildApp({ NODE_ENV: "test" });
+    apps.push(app);
+    await app.inject({ method: "GET", url: "/v1/session" });
+
+    const imported = await app.inject({
+      method: "POST",
+      url: "/v1/tenants/iapro-ec/customers/import",
+      payload: {
+        fileName: "clientes-sinteticos.csv",
+        synthetic: true,
+        consentConfirmed: false,
+        rows: [
+          {
+            displayName: "Cliente sintético uno",
+            accountName: "Empresa sintética",
+            phone: "+593000000001",
+            email: "",
+            taxId: "",
+            notes: "Prueba controlada",
+          },
+          {
+            displayName: "Cliente sintético duplicado",
+            accountName: "Empresa sintética",
+            phone: "+593000000001",
+            email: "duplicado@example.invalid",
+            taxId: "",
+            notes: "Debe omitirse por teléfono",
+          },
+        ],
+      },
+    });
+    expect(imported.statusCode, imported.body).toBe(201);
+    expect(imported.json()).toMatchObject({
+      imported: 1,
+      duplicates: 1,
+      total: 1,
+      outboundAllowed: false,
+    });
+    expect(imported.json().customers[0]).toMatchObject({
+      tenantId: "iapro-ec",
+      synthetic: true,
+      consentStatus: "not_applicable_synthetic",
+      outboundAllowed: false,
+    });
+
+    const list = await app.inject({
+      method: "GET",
+      url: "/v1/tenants/iapro-ec/customers",
+    });
+    expect(list.statusCode).toBe(200);
+    expect(list.json().total).toBe(1);
+    const isolated = await app.inject({
+      method: "GET",
+      url: "/v1/tenants/pcdoctor-ec/customers",
+    });
+    expect(isolated.statusCode).toBe(200);
+    expect(isolated.json().total).toBe(0);
+
+    const missingConsent = await app.inject({
+      method: "POST",
+      url: "/v1/tenants/iapro-ec/customers/import",
+      payload: {
+        fileName: "clientes-reales.csv",
+        synthetic: false,
+        consentConfirmed: false,
+        rows: [
+          {
+            displayName: "Cliente no autorizado",
+            phone: "+593999999999",
+            email: "",
+          },
+        ],
+      },
+    });
+    expect(missingConsent.statusCode).toBe(400);
+    expect(missingConsent.json().error).toBe("invalid_customer_import");
+  });
+
+  it("runs the guarded inspection, configurable VAT, quote and delivery-draft flow", async () => {
+    const app = await buildApp({ NODE_ENV: "test" });
+    apps.push(app);
+    await app.inject({ method: "GET", url: "/v1/session" });
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/v1/tenants/pcdoctor-ec/cases",
+      payload: {
+        customerId: "customer-electric-fence",
+        customerName: "Condominio sintético",
+        customerIdentifier: "0100000009",
+        title: "Inspección de cerco eléctrico",
+        description: "Prueba controlada del recorrido multimodal.",
+        synthetic: true,
+      },
+    });
+    expect(created.statusCode, created.body).toBe(201);
+    const caseId = created.json().case.id as string;
+
+    const defaults = await app.inject({
+      method: "GET",
+      url: "/v1/tenants/pcdoctor-ec/operational-settings",
+    });
+    expect(defaults.statusCode).toBe(200);
+    expect(defaults.json()).toMatchObject({
+      settings: { defaultTaxRatePct: 15 },
+      usage: { inspections: 0, inspectionLimit: 20 },
+    });
+
+    const configured = await app.inject({
+      method: "PUT",
+      url: "/v1/tenants/pcdoctor-ec/operational-settings",
+      payload: {
+        ...defaults.json().settings,
+        defaultTaxRatePct: 12.5,
+        monthlyLimits: {
+          ...defaults.json().settings.monthlyLimits,
+          inspections: 1,
+        },
+      },
+    });
+    expect(configured.statusCode, configured.body).toBe(200);
+    expect(configured.json().settings.defaultTaxRatePct).toBe(12.5);
+
+    const analyzed = await app.inject({
+      method: "POST",
+      url: `/v1/tenants/pcdoctor-ec/cases/${caseId}/inspections/analyze`,
+      payload: {
+        systemType: "electric_fence",
+        title: "Informe técnico de cerco eléctrico",
+        siteName: "Condominio sintético",
+        narrative:
+          "Se observan aisladores deteriorados. Falta confirmar voltaje, puesta a tierra y cantidad definitiva.",
+        evidence: [],
+        synthetic: true,
+      },
+    });
+    expect(analyzed.statusCode, analyzed.body).toBe(201);
+    expect(analyzed.json().inspection).toMatchObject({
+      tenantId: "pcdoctor-ec",
+      caseId,
+      systemType: "electric_fence",
+      status: "draft",
+      synthetic: true,
+    });
+    expect(
+      analyzed.json().inspection.analysis.missingInformation.length,
+    ).toBeGreaterThan(0);
+    const inspectionId = analyzed.json().inspection.id as string;
+
+    const limited = await app.inject({
+      method: "POST",
+      url: `/v1/tenants/pcdoctor-ec/cases/${caseId}/inspections/analyze`,
+      payload: {
+        systemType: "electric_fence",
+        title: "Segunda inspección",
+        siteName: "Condominio sintético",
+        narrative: "Esta segunda operación debe respetar el límite mensual.",
+        evidence: [],
+        synthetic: true,
+      },
+    });
+    expect(limited.statusCode).toBe(429);
+    expect(limited.json().error).toBe("monthly_inspection_limit_reached");
+
+    const quoted = await app.inject({
+      method: "POST",
+      url: `/v1/tenants/pcdoctor-ec/cases/${caseId}/quotes`,
+      payload: {
+        inspectionId,
+        proposalTitle: "Reparación del cerco eléctrico perimetral",
+        executiveSummary:
+          "Se propone corregir los elementos deteriorados y ejecutar las mediciones necesarias antes de la entrega.",
+        technicalProposal:
+          "La intervención contempla revisión, reemplazo de componentes confirmados, pruebas funcionales y entrega documentada.",
+        scope: ["Reemplazar componentes confirmados por el técnico."],
+        exclusions: ["No incluye trabajos no visibles durante la inspección inicial."],
+        items: [
+          {
+            code: "AIS-01",
+            description: "Aislador para cerco eléctrico",
+            quantity: 10,
+            unit: "unidad",
+            unitPriceUsd: 2.5,
+          },
+          {
+            code: "MO-01",
+            description: "Mano de obra técnica y pruebas",
+            quantity: 1,
+            unit: "servicio",
+            unitPriceUsd: 75,
+          },
+        ],
+      },
+    });
+    expect(quoted.statusCode, quoted.body).toBe(201);
+    expect(quoted.json().quote).toMatchObject({
+      subtotalUsd: 100,
+      taxRatePct: 12.5,
+      taxAmountUsd: 12.5,
+      totalUsd: 112.5,
+      outboundAllowed: false,
+      status: "pending_approval",
+    });
+    const quoteId = quoted.json().quote.id as string;
+
+    const delivery = await app.inject({
+      method: "POST",
+      url: `/v1/tenants/pcdoctor-ec/cases/${caseId}/delivery-drafts`,
+      payload: {
+        quoteId,
+        channel: "whatsapp",
+        recipient: "+593000000000",
+        subject: "",
+        message:
+          "Borrador sintético de entrega de la cotización para revisión y aprobación humana.",
+      },
+    });
+    expect(delivery.statusCode, delivery.body).toBe(201);
+    expect(delivery.json()).toMatchObject({
+      outboundEnabled: false,
+      draft: { status: "awaiting_approval", sent: false },
+    });
+
+    const history = await app.inject({
+      method: "GET",
+      url: `/v1/tenants/pcdoctor-ec/cases/${caseId}/inspections`,
+    });
+    expect(history.statusCode).toBe(200);
+    expect(history.json().inspections).toHaveLength(1);
+    expect(history.json().quotes).toHaveLength(1);
+  });
 });

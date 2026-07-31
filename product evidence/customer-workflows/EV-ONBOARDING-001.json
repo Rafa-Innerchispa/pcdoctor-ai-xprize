@@ -1,0 +1,18 @@
+{
+  "evidenceId": "EV-ONBOARDING-001",
+  "capturedAtUtc": "2026-07-31T20:51:56Z",
+  "environment": "local-demo",
+  "dataClassification": "synthetic",
+  "claim": "A tenant can start without importing data or preview a bounded contact file before saving it.",
+  "acceptance": {
+    "supportedFileTypes": ["csv", "tsv", "txt"],
+    "rowsSubmitted": 2,
+    "contactsImported": 1,
+    "duplicatesOmitted": 1,
+    "outboundAllowed": false,
+    "emptyWorkspacePathVerified": true,
+    "mobileViewportVerified": true,
+    "browserErrors": 0
+  },
+  "notes": "Synthetic contacts only. No customer was contacted and no invoice was issued."
+}

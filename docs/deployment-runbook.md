@@ -49,6 +49,12 @@ printf '%s' 'VALUE_FROM_PREVIOUS_COMMAND' | gcloud secrets versions add fieldspa
 
 Never paste the key into a tracked file or terminal recording.
 
+The staging Gemini Developer API key is created in the dedicated project,
+restricted to `generativelanguage.googleapis.com`, and stored as
+`fieldspark-gemini-api-key`. Do not print or copy the key into a tracked file.
+AI Studio automatic reload must remain disabled and the project spend cap must
+be verified before enabling `GEMINI_PROVIDER=developer`.
+
 ## 5. GitHub deployment variables
 
 Repository variables:
@@ -80,6 +86,8 @@ Verify:
 - model and request reference are present;
 - a matching structured entry exists in Cloud Logging;
 - no secret or personal data is visible.
+- `estimatedCostUsd` is populated;
+- `GET /v1/ai/usage` reports the call under `pcdoctor-ai`.
 
 Export a redacted record and register it in the evidence manifest.
 

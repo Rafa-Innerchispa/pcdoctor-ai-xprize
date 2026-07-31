@@ -8,7 +8,7 @@ const booleanString = z
 const configSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(8080),
-  WEB_ORIGIN: z.string().default("http://localhost:3000"),
+  WEB_ORIGIN: z.string().default("http://localhost:5173"),
   DEMO_MODE: z
     .enum(["true", "false"])
     .default("true")
@@ -24,7 +24,26 @@ const configSchema = z.object({
   API_ADMIN_KEY: z.string().default(""),
   GOOGLE_CLOUD_PROJECT: z.string().default(""),
   GOOGLE_CLOUD_LOCATION: z.string().default("global"),
-  GEMINI_MODEL: z.string().default("gemini-2.5-flash"),
+  GEMINI_PROVIDER: z.enum(["vertex", "developer"]).default("vertex"),
+  GEMINI_API_KEY: z.string().default(""),
+  GEMINI_MODEL: z.string().default("gemini-3.5-flash-lite"),
+  GEMINI_MAX_OUTPUT_TOKENS: z.coerce
+    .number()
+    .int()
+    .min(128)
+    .max(8_192)
+    .default(1_024),
+  GEMINI_THINKING_LEVEL: z
+    .enum(["minimal", "low", "medium", "high"])
+    .default("minimal"),
+  GEMINI_INPUT_USD_PER_MILLION: z.coerce
+    .number()
+    .nonnegative()
+    .default(0.3),
+  GEMINI_OUTPUT_USD_PER_MILLION: z.coerce
+    .number()
+    .nonnegative()
+    .default(2.5),
   FIRESTORE_DATABASE: z.string().default("(default)"),
   RUC_API_LIVE_ENABLED: booleanString,
   RUC_API_TOKEN_BASE_URL: z.string().default(""),
