@@ -38,6 +38,14 @@ const ownerTenants = [
     playbook: "photography_studio",
     environment: "staging",
   },
+  {
+    id: "servifran-pilot",
+    slug: "servifran",
+    legalName: "Identidad legal pendiente de confirmación",
+    displayName: "SERVIFRAN",
+    playbook: "condominium_management",
+    environment: "staging",
+  },
 ] as const;
 
 export function membershipId(tenantId: string, userId: string) {

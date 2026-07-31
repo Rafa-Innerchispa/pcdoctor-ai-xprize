@@ -11,3 +11,4 @@
 | 2026-07-29 | production runs in Google Cloud; local servers are non-critical | ADR-007 |
 | 2026-07-29 | gallery/archive work moves to Phase 2 | ADR-008 |
 | 2026-07-29 | use React/Vite static web instead of Next.js for the foundation | ADR-009 |
+| 2026-07-30 | add SERVIFRAN with isolated property workspaces and a central portfolio brief | ADR-010 |

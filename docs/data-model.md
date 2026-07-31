@@ -41,8 +41,36 @@ Ecuadorian tax invoice. Issuance remains outside Phase 1.
 The canonical schema is enforced in `packages/contracts/src/index.ts`. Events
 are append-only. Corrections create new events; they do not rewrite history.
 
+### Managed property
+
+Condominium, urbanization, building, or complex administered within one
+tenant. It records type, city, address, unit count, onboarding state, assigned
+administrator, and synthetic/real status.
+
+### Property system
+
+Critical-system or asset group linked to one managed property: type, name,
+condition, quantity, last and next inspection, notes, and evidence references.
+Unknown condition remains explicit.
+
+### Property issue
+
+Security, fire safety, coexistence, maintenance, utilities, finance,
+collections, governance, supplier, emergency, or other novelty. It records
+source, priority, status, owner, due date, and the property boundary.
+
+### Property commitment
+
+Meeting, assembly, inspection, task, deadline, or payment reminder linked to a
+property or the authorized tenant-wide portfolio.
+
 ## Tenant boundary
 
 No query may return data without a tenant predicate except a platform-owner
 administrative query protected by a separate authorization path. Cross-tenant
 analytics must use aggregated, de-identified records.
+
+Within the SERVIFRAN tenant, platform/tenant administrators can see the
+portfolio. A collaborator can see only a property assigned to or created by
+that user. Property-level resident scoping is a later schema addition and is
+not simulated by exposing all resident data.

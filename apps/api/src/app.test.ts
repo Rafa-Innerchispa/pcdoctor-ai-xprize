@@ -338,6 +338,7 @@ describe("FieldSpark API", () => {
     ["pcdoctor-ec", "pcdoctor"],
     ["iapro-ec", "iapro"],
     ["studio-pilot", "photography_studio"],
+    ["servifran-pilot", "condominium_management"],
   ] as const)(
     "runs the complete guarded case journey for %s",
     async (tenantId, playbook) => {
@@ -413,6 +414,100 @@ describe("FieldSpark API", () => {
     },
   );
 
+  it("builds an isolated SERVIFRAN portfolio brief from operational records", async () => {
+    const app = await buildApp({ NODE_ENV: "test" });
+    apps.push(app);
+    await app.inject({ method: "GET", url: "/v1/session" });
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/v1/tenants/servifran-pilot/properties",
+      payload: {
+        name: "Villa Blanca sintética",
+        propertyType: "urbanization",
+        city: "Guayaquil",
+        address: "Dirección sintética",
+        unitCount: 120,
+        administratorName: "Administrador de prueba",
+        synthetic: true,
+      },
+    });
+    expect(created.statusCode, created.body).toBe(201);
+    expect(created.json().property).toMatchObject({
+      tenantId: "servifran-pilot",
+      name: "Villa Blanca sintética",
+      status: "onboarding",
+      synthetic: true,
+    });
+    const propertyId = created.json().property.id as string;
+
+    const system = await app.inject({
+      method: "POST",
+      url: `/v1/tenants/servifran-pilot/properties/${propertyId}/systems`,
+      payload: {
+        systemType: "electric_fence",
+        name: "Cerco eléctrico perimetral",
+        condition: "attention",
+        inventoryCount: 1,
+        notes: "Registro sintético para probar inventario.",
+        synthetic: true,
+      },
+    });
+    expect(system.statusCode, system.body).toBe(201);
+
+    const issue = await app.inject({
+      method: "POST",
+      url: `/v1/tenants/servifran-pilot/properties/${propertyId}/issues`,
+      payload: {
+        category: "security",
+        title: "Sector norte requiere revisión",
+        description: "Novedad sintética para verificar el flujo central.",
+        priority: "critical",
+        source: "audio",
+        synthetic: true,
+      },
+    });
+    expect(issue.statusCode, issue.body).toBe(201);
+
+    const commitment = await app.inject({
+      method: "POST",
+      url: "/v1/tenants/servifran-pilot/portfolio/commitments",
+      payload: {
+        propertyId,
+        commitmentType: "meeting",
+        title: "Reunión sintética con el directorio",
+        startsAt: "2099-08-01T14:00:00.000Z",
+        notes: "Agenda de prueba.",
+        synthetic: true,
+      },
+    });
+    expect(commitment.statusCode, commitment.body).toBe(201);
+
+    const brief = await app.inject({
+      method: "GET",
+      url: `/v1/tenants/servifran-pilot/portfolio/brief?propertyId=${propertyId}`,
+    });
+    expect(brief.statusCode, brief.body).toBe(200);
+    expect(brief.json().brief).toMatchObject({
+      tenantId: "servifran-pilot",
+      grounded: true,
+      outboundAllowed: false,
+      totals: {
+        properties: 1,
+        openIssues: 1,
+        criticalIssues: 1,
+        systemsRequiringAttention: 1,
+        upcomingCommitments: 1,
+      },
+    });
+
+    const crossTenant = await app.inject({
+      method: "GET",
+      url: `/v1/tenants/pcdoctor-ec/properties/${propertyId}`,
+    });
+    expect(crossTenant.statusCode).toBe(404);
+  });
+
   it("protects the product, bootstraps its owner and accepts invited users", async () => {
     const identities = {
       owner: {
@@ -460,7 +555,7 @@ describe("FieldSpark API", () => {
       email: "rafagye@gmail.com",
       profileComplete: false,
     });
-    expect(ownerSession.json().memberships).toHaveLength(3);
+    expect(ownerSession.json().memberships).toHaveLength(4);
     expect(ownerSession.json().memberships[0]).toMatchObject({
       tenant: { id: "pcdoctor-ec", displayName: "PC Doctor" },
       membership: { role: "platform_owner", status: "active" },

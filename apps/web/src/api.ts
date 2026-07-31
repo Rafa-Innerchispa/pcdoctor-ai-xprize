@@ -8,7 +8,12 @@ import type {
   FieldSparkSession,
   Invitation,
   Membership,
+  ManagedProperty,
   PlaybookDefinition,
+  PropertyCommitment,
+  PropertyIssue,
+  PropertyPortfolioBrief,
+  PropertySystem,
   SyntheticContact,
 } from "@fieldspark/contracts";
 import { getCurrentIdToken } from "./firebase";
@@ -152,6 +157,142 @@ export async function transitionBusinessCase(
 ) {
   return apiRequest<{ case: BusinessCase }>(
     `/v1/tenants/${encodeURIComponent(tenantId)}/cases/${encodeURIComponent(caseId)}/transitions`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
+}
+
+export async function loadManagedProperties(tenantId: string) {
+  return apiRequest<{ properties: ManagedProperty[] }>(
+    `/v1/tenants/${encodeURIComponent(tenantId)}/properties`,
+  );
+}
+
+export async function createManagedProperty(
+  tenantId: string,
+  input: {
+    name: string;
+    propertyType:
+      | "condominium"
+      | "urbanization"
+      | "residential_building"
+      | "mixed_use"
+      | "commercial_complex";
+    city: string;
+    address: string;
+    unitCount: number | null;
+    administratorName: string;
+    administratorUserId: string | null;
+    synthetic: boolean;
+  },
+) {
+  return apiRequest<{ property: ManagedProperty }>(
+    `/v1/tenants/${encodeURIComponent(tenantId)}/properties`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
+}
+
+export async function loadPropertyPortfolioBrief(
+  tenantId: string,
+  propertyId?: string,
+) {
+  const query = propertyId
+    ? `?propertyId=${encodeURIComponent(propertyId)}`
+    : "";
+  return apiRequest<{ brief: PropertyPortfolioBrief }>(
+    `/v1/tenants/${encodeURIComponent(tenantId)}/portfolio/brief${query}`,
+  );
+}
+
+export async function createPropertySystem(
+  tenantId: string,
+  propertyId: string,
+  input: {
+    systemType:
+      | "electric_fence"
+      | "fire_detection"
+      | "fire_suppression"
+      | "cctv"
+      | "access_control"
+      | "alarms"
+      | "elevators"
+      | "pumps"
+      | "generator"
+      | "water"
+      | "lighting"
+      | "gas"
+      | "gates"
+      | "intercom"
+      | "playground"
+      | "pool"
+      | "other";
+    name: string;
+    condition: "unknown" | "operational" | "attention" | "critical";
+    inventoryCount: number;
+    notes: string;
+    synthetic: boolean;
+  },
+) {
+  return apiRequest<{ system: PropertySystem }>(
+    `/v1/tenants/${encodeURIComponent(tenantId)}/properties/${encodeURIComponent(propertyId)}/systems`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
+}
+
+export async function createPropertyIssue(
+  tenantId: string,
+  propertyId: string,
+  input: {
+    category:
+      | "security"
+      | "fire_safety"
+      | "coexistence"
+      | "maintenance"
+      | "infrastructure"
+      | "utilities"
+      | "finance"
+      | "collections"
+      | "legal"
+      | "governance"
+      | "communication"
+      | "staff"
+      | "supplier"
+      | "emergency"
+      | "other";
+    title: string;
+    description: string;
+    priority: "low" | "medium" | "high" | "critical";
+    source: "manual" | "audio" | "email" | "whatsapp" | "meeting" | "system";
+    synthetic: boolean;
+  },
+) {
+  return apiRequest<{ issue: PropertyIssue }>(
+    `/v1/tenants/${encodeURIComponent(tenantId)}/properties/${encodeURIComponent(propertyId)}/issues`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
+}
+
+export async function createPropertyCommitment(
+  tenantId: string,
+  input: {
+    propertyId: string | null;
+    commitmentType:
+      | "meeting"
+      | "task"
+      | "deadline"
+      | "assembly"
+      | "inspection"
+      | "payment";
+    title: string;
+    startsAt: string | null;
+    dueAt: string | null;
+    reminderAt: string | null;
+    ownerUserId: string | null;
+    notes: string;
+    synthetic: boolean;
+  },
+) {
+  return apiRequest<{ commitment: PropertyCommitment }>(
+    `/v1/tenants/${encodeURIComponent(tenantId)}/portfolio/commitments`,
     { method: "POST", body: JSON.stringify(input) },
   );
 }

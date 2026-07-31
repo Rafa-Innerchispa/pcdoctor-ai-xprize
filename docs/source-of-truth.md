@@ -39,6 +39,10 @@ The initial customers under evaluation are independent businesses:
    operation according to information supplied as of this date.
 2. A photography studio with approximately 2,000 WhatsApp contacts and
    spreadsheet-based operating information.
+3. SERVIFRAN - Servicios Inmobiliarios, identified in authorized internal
+   sources as a Guayaquil lead for administration of buildings and
+   urbanizations. Legal name, RUC, contact channels, managed communities, and
+   commercial acceptance remain unconfirmed.
 
 No customer is counted as active, paying, or contracted until documentary
 evidence exists.
@@ -54,6 +58,8 @@ Initial release:
 - human approval inbox;
 - event log;
 - billing work queue, not tax invoice issuance;
+- SERVIFRAN managed-property portfolio, critical-system inventory, issues,
+  commitments, and grounded brief;
 - executive dashboard and evidence mode;
 - Google Cloud deployment blueprint.
 

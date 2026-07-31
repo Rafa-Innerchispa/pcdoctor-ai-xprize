@@ -110,6 +110,30 @@ export const playbookDefinitions: Record<
       "Cerrar con entrega, saldo y próxima campaña consentida.",
     ],
   ),
+  condominium_management: define(
+    "condominium_management",
+    "Administración de condominios",
+    [
+      "Ingreso",
+      "Comunidad",
+      "Diagnóstico",
+      "Cotización",
+      "Autorización",
+      "Ejecución",
+      "Facturación",
+      "Cerrado",
+    ],
+    [
+      "Registrar urbanización, edificio, origen, responsable y evidencia.",
+      "Validar propietario, proveedor o contraparte y su vínculo con la comunidad.",
+      "Clasificar seguridad, convivencia, mantenimiento o gestión y definir prioridad.",
+      "Preparar alternativas, alcance, proveedor, presupuesto y plazo.",
+      "Obtener aprobación según facultades del administrador, directorio o asamblea.",
+      "Asignar responsable, ejecutar, documentar novedades y verificar el resultado.",
+      "Preparar el gasto o rubro facturable sin emitir ni pagar automáticamente.",
+      "Cerrar con acta, evidencia, garantía, inventario actualizado y próxima revisión.",
+    ],
+  ),
 };
 
 const nextStageByAction = {
