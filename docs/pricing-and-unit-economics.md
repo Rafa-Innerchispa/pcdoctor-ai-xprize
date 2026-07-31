@@ -69,6 +69,22 @@ structured intake only. Audio transcription, long documents, multimodal
 inspection, search grounding, and agentic loops require separate benchmarks
 before they are included in a subscription.
 
+### Initial technical-inspection result — 2026-07-31
+
+A deployed acceptance test sent a synthetic electric-fence narrative through
+the production-configured inspection endpoint. Gemini produced two findings
+and four missing-information questions from 165 input and 354 output tokens.
+The estimated list-price AI cost was **USD 0.0009345** for that call. The
+server then calculated a two-line synthetic quote at USD 100.00 subtotal,
+USD 15.00 VAT, and USD 115.00 total without giving Gemini control over prices
+or tax calculations.
+
+At the same measured profile, 1,000 text-only inspection analyses would have
+an estimated Gemini list-price cost of approximately **USD 0.9345**. This is
+not a photo, audio, long-document, internet-search, storage, messaging, or
+support benchmark; each of those components must be measured separately
+before setting final subscription allowances.
+
 ## Guardrails
 
 - Promotional credits must not justify a price that becomes unprofitable after

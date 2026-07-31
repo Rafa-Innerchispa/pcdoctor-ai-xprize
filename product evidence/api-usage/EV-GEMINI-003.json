@@ -1,0 +1,59 @@
+{
+  "evidenceId": "EV-GEMINI-003",
+  "capturedAtUtc": "2026-07-31T19:44:00Z",
+  "environment": "gcp-staging",
+  "synthetic": true,
+  "claim": "The deployed multimodal inspection workflow completed a real Gemini analysis, generated a deterministic itemized quote, and prepared approval-bound email and WhatsApp drafts.",
+  "deployment": {
+    "apiRevision": "fieldspark-api-00034-zxm",
+    "webRevision": "fieldspark-web-00013-nsv"
+  },
+  "inspection": {
+    "systemType": "electric_fence",
+    "evidenceMode": "text-only synthetic acceptance test",
+    "model": "gemini-3.5-flash-lite",
+    "requestReference": "iPpsauqgLKvX_uMPqbXLoQs",
+    "inputTokens": 165,
+    "outputTokens": 354,
+    "estimatedListPriceCostUsd": 0.0009345,
+    "findingsCount": 2,
+    "missingQuestionsCount": 4,
+    "humanApproval": "required"
+  },
+  "quote": {
+    "quoteNumber": "COT-2026-0001",
+    "lineCount": 2,
+    "subtotalUsd": 100,
+    "taxRatePct": 15,
+    "taxAmountUsd": 15,
+    "totalUsd": 115,
+    "currency": "USD",
+    "pricingSource": "human-entered synthetic catalog values",
+    "calculationSource": "deterministic server calculation",
+    "outboundAllowed": false,
+    "logoConfigured": true
+  },
+  "deliveryDrafts": [
+    {
+      "channel": "email",
+      "status": "awaiting_approval",
+      "sent": false
+    },
+    {
+      "channel": "whatsapp",
+      "status": "awaiting_approval",
+      "sent": false
+    }
+  ],
+  "usageWindowAfterTest": {
+    "requests": 6,
+    "inputTokens": 733,
+    "outputTokens": 1379,
+    "estimatedListPriceCostUsd": 0.0036674
+  },
+  "limitations": [
+    "This acceptance test used synthetic text only; photo, audio, PDF and DOCX paths are implemented but require separate cost benchmarks.",
+    "No customer was contacted and no invoice was issued.",
+    "Raw evidence persistence is not yet enabled; structured inspection and quote records are persisted."
+  ]
+}
