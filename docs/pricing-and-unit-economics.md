@@ -51,6 +51,24 @@ Then add Cloud Run, Firestore, messaging, storage, support, payment processing,
 tax, and a safety margin. Keep gross usage visible even when prepaid or
 promotional credits reduce the current cash expense.
 
+### Initial synthetic result — 2026-07-30
+
+The first controlled prepaid sample completed 15 metered requests across the
+four staging tenants:
+
+| Tenant | Requests | Estimated Gemini cost | Projected per 1,000 similar requests |
+|---|---:|---:|---:|
+| PC Doctor | 5 | USD 0.0027329 | USD 0.54658 |
+| IAPRO | 5 | USD 0.0030659 | USD 0.61318 |
+| Photography studio | 3 | USD 0.0013946 | USD 0.46487 |
+| SERVIFRAN | 2 | USD 0.0008382 | USD 0.41910 |
+| **Total / blended** | **15** | **USD 0.0080316** | **USD 0.53544** |
+
+Average latency was approximately 0.95–1.15 seconds. This sample covers short
+structured intake only. Audio transcription, long documents, multimodal
+inspection, search grounding, and agentic loops require separate benchmarks
+before they are included in a subscription.
+
 ## Guardrails
 
 - Promotional credits must not justify a price that becomes unprofitable after
