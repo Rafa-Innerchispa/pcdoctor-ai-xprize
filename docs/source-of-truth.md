@@ -97,7 +97,11 @@ Potential initial contracted value: USD 868. This is a projection, not revenue.
 - Local development and testing are allowed.
 - Production runtime must be Google Cloud, not an unreliable local server.
 - Web and API deploy to Cloud Run.
-- Gemini is called server-side through Vertex AI using `@google/genai`.
+- Gemini is called server-side through a provider adapter using `@google/genai`.
+  Controlled staging uses the Gemini Developer API prepaid plan so usage stops
+  when prepaid funds or the project cap are exhausted. Vertex AI through
+  Application Default Credentials remains supported for later production use
+  when its billing source is explicitly approved.
 - Firestore stores operational records and audit events.
 - Evolution API, PostgreSQL, and Redis run on a dedicated Compute Engine VM when
   approved; local Evolution instances are not production dependencies.

@@ -74,7 +74,12 @@ export const analyzeCaseRequestSchema = z.object({
   tenantId: z.string().min(2).max(80),
   customerId: z.string().min(2).max(80),
   caseId: z.string().min(2).max(80),
-  playbook: z.enum(["photography_studio", "iapro"]),
+  playbook: z.enum([
+    "pcdoctor",
+    "iapro",
+    "photography_studio",
+    "condominium_management",
+  ]),
   message: z.string().min(5).max(12_000),
   channel: z.enum(["whatsapp", "form", "audio_transcript", "spreadsheet"]),
 });

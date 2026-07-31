@@ -7,7 +7,7 @@ flowchart LR
   U["Operator / judge"] --> W["React/Vite web · Cloud Run"]
   W --> A["Fastify API · Cloud Run"]
   C["WhatsApp / forms / spreadsheets"] --> A
-  A --> G["Gemini · Vertex AI"]
+  A --> G["Gemini · prepaid Developer API or Vertex AI"]
   A --> F["Firestore"]
   A --> L["Cloud Logging"]
   A --> S["Secret Manager"]
@@ -44,12 +44,23 @@ endpoints require an admin key outside demo mode.
 
 ### Gemini
 
-`@google/genai` is initialized with `vertexai: true`, project, location, and
-stable API version `v1`. Application Default Credentials are used. API keys are
-never exposed to the browser.
+`@google/genai` is behind a server-side provider adapter. The controlled
+staging environment uses a Gemini Developer API key restricted to
+`generativelanguage.googleapis.com`, stored in Secret Manager, and attached to
+an AI Studio prepaid billing plan. Vertex AI remains available through
+Application Default Credentials. API keys are never exposed to the browser or
+repository.
 
 The intake call returns structured business analysis. It is a decision-support
 step, not autonomous execution. Pricing and outbound text remain approval-bound.
+Every completed call records tenant, model, input/output tokens, estimated
+list-price cost, latency, request reference, and human-approval state.
+
+Staging has three cost controls:
+
+- AI Studio prepaid balance with automatic reload disabled;
+- a USD 5 monthly project spend cap;
+- bounded output and minimal thinking for routine intake extraction.
 
 ### Data
 

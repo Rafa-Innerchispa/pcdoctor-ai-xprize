@@ -1496,6 +1496,86 @@ export async function buildApp(
     return { events: await eventStore.list(tenantId) };
   });
 
+  app.get("/v1/ai/usage", async (request, reply) => {
+    if (!requireAdmin(request, config)) {
+      return reply.code(401).send({ error: "admin_key_required" });
+    }
+    const tenantId =
+      typeof request.query === "object" &&
+      request.query &&
+      "tenantId" in request.query &&
+      typeof request.query.tenantId === "string"
+        ? request.query.tenantId
+        : undefined;
+    const events = (await eventStore.list(tenantId)).filter(
+      (event) => event.eventName === "gemini_analysis_completed",
+    );
+    const byTenant = new Map<
+      string,
+      {
+        requests: number;
+        inputTokens: number;
+        outputTokens: number;
+        estimatedCostUsd: number;
+        durationMs: number;
+      }
+    >();
+    for (const event of events) {
+      const aggregate = byTenant.get(event.tenantId) ?? {
+        requests: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        estimatedCostUsd: 0,
+        durationMs: 0,
+      };
+      aggregate.requests += 1;
+      aggregate.inputTokens += event.inputTokens ?? 0;
+      aggregate.outputTokens += event.outputTokens ?? 0;
+      aggregate.estimatedCostUsd += event.estimatedCostUsd ?? 0;
+      aggregate.durationMs += event.durationMs;
+      byTenant.set(event.tenantId, aggregate);
+    }
+    const tenants = [...byTenant.entries()].map(([id, aggregate]) => ({
+      tenantId: id,
+      requests: aggregate.requests,
+      inputTokens: aggregate.inputTokens,
+      outputTokens: aggregate.outputTokens,
+      estimatedCostUsd: Number(aggregate.estimatedCostUsd.toFixed(8)),
+      averageDurationMs:
+        aggregate.requests === 0
+          ? 0
+          : Math.round(aggregate.durationMs / aggregate.requests),
+    }));
+    return {
+      provider: config.GEMINI_PROVIDER,
+      model: config.GEMINI_MODEL,
+      pricingUsdPerMillionTokens: {
+        input: config.GEMINI_INPUT_USD_PER_MILLION,
+        output: config.GEMINI_OUTPUT_USD_PER_MILLION,
+      },
+      maxOutputTokensPerRequest: config.GEMINI_MAX_OUTPUT_TOKENS,
+      thinkingLevelPerRequest: config.GEMINI_THINKING_LEVEL,
+      sourceEventWindow: 100,
+      totals: {
+        requests: tenants.reduce((sum, tenant) => sum + tenant.requests, 0),
+        inputTokens: tenants.reduce(
+          (sum, tenant) => sum + tenant.inputTokens,
+          0,
+        ),
+        outputTokens: tenants.reduce(
+          (sum, tenant) => sum + tenant.outputTokens,
+          0,
+        ),
+        estimatedCostUsd: Number(
+          tenants
+            .reduce((sum, tenant) => sum + tenant.estimatedCostUsd, 0)
+            .toFixed(8),
+        ),
+      },
+      tenants,
+    };
+  });
+
   app.post("/v1/cases/analyze", async (request, reply) => {
     if (!config.DEMO_MODE && !requireAdmin(request, config)) {
       return reply.code(401).send({ error: "admin_key_required" });
@@ -1517,6 +1597,7 @@ export async function buildApp(
             requestReference: `demo-${randomUUID()}`,
             inputTokens: null,
             outputTokens: null,
+            estimatedCostUsd: null,
           }
         : await gemini.analyze(parsed.data);
 
@@ -1539,7 +1620,7 @@ export async function buildApp(
         requestReference: result.requestReference,
         inputTokens: result.inputTokens,
         outputTokens: result.outputTokens,
-        estimatedCostUsd: null,
+        estimatedCostUsd: result.estimatedCostUsd,
         humanApproval: result.analysis.requiresHumanApproval
           ? "required"
           : "not_required",
