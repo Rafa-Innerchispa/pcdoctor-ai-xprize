@@ -7,6 +7,8 @@ import {
   businessCaseCreateSchema,
   businessCaseSchema,
   caseTransitionRequestSchema,
+  customerContactImportRequestSchema,
+  customerContactSchema,
   deliveryDraftCreateSchema,
   deliveryDraftSchema,
   ecIdentityValidationRequestSchema,
@@ -36,6 +38,7 @@ import {
   type AnalyzeCaseRequest,
   type AuditEvent,
   type BusinessCase,
+  type CustomerContact,
   type DemoWorkflow,
   type FieldSparkPermission,
   type SyntheticContact,
@@ -51,6 +54,7 @@ import {
 } from "./auth.js";
 import { contactsToCsv } from "./contact-csv.js";
 import { createContactStore } from "./contact-store.js";
+import { createCustomerStore } from "./customer-store.js";
 import { createCaseStore } from "./case-store.js";
 import {
   playbookDefinitions,
@@ -113,6 +117,7 @@ export async function buildApp(
   });
   const eventStore = createEventStore(config);
   const contactStore = createContactStore(config);
+  const customerStore = createCustomerStore(config);
   const caseStore = createCaseStore(config);
   const workflowStore = createWorkflowStore(config);
   const identityStore = createIdentityStore(config);
@@ -751,6 +756,116 @@ export async function buildApp(
     request.log.info({ auditEvent: event }, "business case event completed");
     return event;
   }
+
+  function customerKeys(customer: {
+    taxId: string;
+    phone: string;
+    email: string;
+  }) {
+    return [
+      customer.taxId ? `tax:${customer.taxId.replace(/\D/g, "")}` : "",
+      customer.phone ? `phone:${customer.phone.replace(/\D/g, "")}` : "",
+      customer.email ? `email:${customer.email.trim().toLowerCase()}` : "",
+    ].filter((value) => !value.endsWith(":"));
+  }
+
+  app.get("/v1/tenants/:tenantId/customers", async (request, reply) => {
+    const tenantId = routeParam(request, "tenantId");
+    const membership = await tenantMembership(request, tenantId);
+    if (!membership || !hasPermission(membership, "customers.view")) {
+      return reply.code(403).send({ error: "customer_view_forbidden" });
+    }
+    const customers = await customerStore.list(tenantId);
+    return { customers, total: customers.length };
+  });
+
+  app.post(
+    "/v1/tenants/:tenantId/customers/import",
+    async (request, reply) => {
+      const identity = requireIdentity(request);
+      const tenantId = routeParam(request, "tenantId");
+      const membership = await tenantMembership(request, tenantId);
+      if (!membership || !hasPermission(membership, "customers.manage")) {
+        return reply.code(403).send({ error: "customer_import_forbidden" });
+      }
+      const parsed = customerContactImportRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: "invalid_customer_import",
+          details: parsed.error.flatten(),
+        });
+      }
+
+      const existing = await customerStore.list(tenantId);
+      const knownKeys = new Set(existing.flatMap(customerKeys));
+      const now = new Date().toISOString();
+      const customers: CustomerContact[] = [];
+      let duplicates = 0;
+      for (const row of parsed.data.rows) {
+        const keys = customerKeys(row);
+        if (keys.some((key) => knownKeys.has(key))) {
+          duplicates += 1;
+          continue;
+        }
+        keys.forEach((key) => knownKeys.add(key));
+        customers.push(
+          customerContactSchema.parse({
+            ...row,
+            id: randomUUID(),
+            tenantId,
+            source: "spreadsheet",
+            sourceFileName: parsed.data.fileName,
+            synthetic: parsed.data.synthetic,
+            consentStatus: parsed.data.synthetic
+              ? "not_applicable_synthetic"
+              : "confirmed",
+            outboundAllowed: false,
+            createdBy: identity.uid,
+            createdAt: now,
+            updatedAt: now,
+          }),
+        );
+      }
+      await customerStore.upsertMany(customers);
+
+      const event = auditEventSchema.parse({
+        timestamp: now,
+        eventId: randomUUID(),
+        eventName: "contact_import_completed",
+        tenantId,
+        customerId: null,
+        caseId: null,
+        agentId: identity.uid,
+        actorType: "human",
+        action: "import_customer_contacts",
+        inputSummary: `${parsed.data.rows.length} filas desde ${redactSensitiveText(parsed.data.fileName).slice(0, 120)}; ${parsed.data.synthetic ? "datos de prueba" : "autorización confirmada"}`,
+        decision: "Guardar en el entorno aislado de la empresa y mantener todo contacto saliente bloqueado.",
+        result: `${customers.length} contactos importados; ${duplicates} duplicados omitidos.`,
+        model: null,
+        requestReference: request.id,
+        inputTokens: null,
+        outputTokens: null,
+        estimatedCostUsd: null,
+        humanApproval: "approved",
+        durationMs: 0,
+        status: "completed",
+        error: null,
+        evidenceVersion: "1.0",
+      });
+      await eventStore.append(event);
+      request.log.info(
+        { auditEvent: event },
+        "customer contact import completed",
+      );
+      return reply.code(201).send({
+        imported: customers.length,
+        duplicates,
+        total: existing.length + customers.length,
+        outboundAllowed: false,
+        customers,
+      });
+    },
+  );
 
   app.get("/v1/tenants/:tenantId/cases", async (request, reply) => {
     const identity = requireIdentity(request);

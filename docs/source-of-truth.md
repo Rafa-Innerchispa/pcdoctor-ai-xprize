@@ -51,6 +51,8 @@ evidence exists.
 
 Initial release:
 
+- optional consent-gated contact import from CSV, TSV, or delimited text, with
+  a supported path to start from an empty workspace;
 - intake from normalized message or transcript;
 - customer and opportunity continuity;
 - Gemini classification and next-action recommendation;

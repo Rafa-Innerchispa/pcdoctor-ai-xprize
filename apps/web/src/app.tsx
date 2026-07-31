@@ -8,12 +8,14 @@ import {
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   createInvitation,
+  loadCustomers,
   loadInvitations,
   loadTenantMembers,
   updateMember,
 } from "./api";
 import { useFieldSparkAuth } from "./auth-context";
 import { CasesPanel } from "./components/cases-panel";
+import { CustomersPanel } from "./components/customers-panel";
 import { PortfolioPanel } from "./components/portfolio-panel";
 
 const roleLabels: Record<FieldSparkRole, string> = {
@@ -306,6 +308,23 @@ function OnboardingScreen() {
 
 function PendingAccess() {
   const { session, signOut, refreshSession } = useFieldSparkAuth();
+  const [checking, setChecking] = useState(false);
+  const [checkMessage, setCheckMessage] = useState("");
+
+  async function checkAccess() {
+    setChecking(true);
+    setCheckMessage("");
+    try {
+      await refreshSession();
+      setCheckMessage(
+        `Comprobación terminada a las ${new Date().toLocaleTimeString("es-EC", { hour: "2-digit", minute: "2-digit" })}. Todavía no hay una invitación activa para este correo.`,
+      );
+    } catch {
+      setCheckMessage("No pudimos comprobar el acceso. Revisa la conexión e inténtalo nuevamente.");
+    } finally {
+      setChecking(false);
+    }
+  }
   return (
     <main className="auth-page">
       <section className="auth-card pending-card">
@@ -317,15 +336,48 @@ function PendingAccess() {
           organización asignada. El administrador debe invitar exactamente
           este correo.
         </p>
+        <div className="pending-instructions">
+          <strong>¿Qué debe hacer el administrador?</strong>
+          <span>Entrar a Equipo → Nuevo acceso, pegar este correo y asignar la empresa y el rol.</span>
+        </div>
         <button
           className="primary-button"
-          onClick={() => void refreshSession()}
+          disabled={checking}
+          onClick={() => void checkAccess()}
         >
-          Comprobar acceso
+          {checking ? "Comprobando…" : "Comprobar acceso"}
         </button>
+        {checkMessage ? <p className="access-check-message" role="status">{checkMessage}</p> : null}
         <button className="text-button" onClick={() => void signOut()}>
           Cerrar sesión
         </button>
+      </section>
+    </main>
+  );
+}
+
+function SessionError() {
+  const { error, refreshSession, signOut } = useFieldSparkAuth();
+  const [retrying, setRetrying] = useState(false);
+  async function retry() {
+    setRetrying(true);
+    try {
+      await refreshSession();
+    } catch {
+      // The auth context keeps the user-facing error for this screen.
+    } finally {
+      setRetrying(false);
+    }
+  }
+  return (
+    <main className="auth-page">
+      <section className="auth-card pending-card">
+        <Brand />
+        <span className="pending-icon warning-icon">!</span>
+        <h1>No pudimos abrir tu espacio.</h1>
+        <p>{error || "El servicio no respondió correctamente."}</p>
+        <button className="primary-button" disabled={retrying} onClick={() => void retry()}>{retrying ? "Reintentando…" : "Reintentar"}</button>
+        <button className="text-button" onClick={() => void signOut()}>Cerrar sesión</button>
       </section>
     </main>
   );
@@ -532,8 +584,25 @@ function TeamPanel({
   );
 }
 
-function OverviewPanel({ role }: { role: FieldSparkRole }) {
+function OverviewPanel({
+  role,
+  tenantId,
+  onPrepareImport,
+  onStartBlank,
+}: {
+  role: FieldSparkRole;
+  tenantId: string;
+  onPrepareImport: () => void;
+  onStartBlank: () => void;
+}) {
   const isCustomer = role === "customer";
+  const [customerCount, setCustomerCount] = useState<number | null>(null);
+  useEffect(() => {
+    if (isCustomer) return;
+    loadCustomers(tenantId)
+      .then((result) => setCustomerCount(result.total))
+      .catch(() => setCustomerCount(null));
+  }, [isCustomer, tenantId]);
   const metrics = isCustomer
     ? [
         ["Servicios activos", "0", "Tus servicios aparecerán aquí"],
@@ -542,7 +611,7 @@ function OverviewPanel({ role }: { role: FieldSparkRole }) {
         ["Consultas", "0", "Solicitudes abiertas"],
       ]
     : [
-        ["Clientes", "0", "Listos para importar"],
+        ["Clientes", customerCount === null ? "—" : String(customerCount), customerCount ? "Registros aislados por empresa" : "Importa una lista o empieza desde cero"],
         ["Cotizaciones", "0", "En preparación"],
         ["Servicios activos", "0", "Sincronización pendiente"],
         ["Aprobaciones", "0", "Nada por revisar"],
@@ -584,15 +653,15 @@ function OverviewPanel({ role }: { role: FieldSparkRole }) {
           <h2>
             {isCustomer
               ? "Aún no hay información compartida contigo."
-              : "Conecta la primera fuente de clientes."}
+              : "Elige cómo quieres comenzar."}
           </h2>
           <p>
             {isCustomer
               ? "Cuando tu proveedor publique un servicio o documento, aparecerá en este panel."
-              : "La importación se hará primero en un entorno controlado, sin contactar automáticamente a ninguna persona."}
+              : "Puedes importar una lista revisada o crear el primer expediente sin cargar ningún archivo."}
           </p>
         </div>
-        {!isCustomer ? <button>Preparar importación</button> : null}
+        {!isCustomer ? <div className="first-action-buttons"><button className="primary-button" onClick={onStartBlank}>Empezar desde cero</button><button className="secondary-action" onClick={onPrepareImport}>Importar contactos</button></div> : null}
       </section>
     </>
   );
@@ -696,7 +765,18 @@ function TenantDashboard() {
         </header>
         <div className="product-content">
           {active === "Resumen" ? (
-            <OverviewPanel role={current.membership.role} />
+            <OverviewPanel
+              role={current.membership.role}
+              tenantId={current.tenant.id}
+              onPrepareImport={() => setActive("Clientes")}
+              onStartBlank={() => setActive("Expedientes")}
+            />
+          ) : active === "Clientes" ? (
+            <CustomersPanel
+              tenant={current.tenant}
+              actor={current.membership}
+              onStartWithoutImport={() => setActive("Expedientes")}
+            />
           ) : active === "Portafolio" ? (
             <PortfolioPanel
               tenantId={current.tenant.id}
@@ -722,9 +802,10 @@ function TenantDashboard() {
 }
 
 export function App() {
-  const { loading, authEnabled, firebaseUser, session } = useFieldSparkAuth();
+  const { loading, authEnabled, firebaseUser, session, error } = useFieldSparkAuth();
   if (loading) return <LoadingScreen />;
   if (authEnabled && !firebaseUser) return <WelcomeScreen />;
+  if (!session && error) return <SessionError />;
   if (!session) return <LoadingScreen />;
   if (!session.user.profileComplete) return <OnboardingScreen />;
   if (session.memberships.length === 0) return <PendingAccess />;

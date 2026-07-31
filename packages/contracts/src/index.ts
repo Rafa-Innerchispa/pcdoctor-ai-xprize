@@ -303,6 +303,47 @@ export const memberUpdateSchema = z.object({
   status: z.enum(["active", "suspended"]),
 });
 
+export const customerContactImportRowSchema = z
+  .object({
+    displayName: z.string().trim().min(2).max(120),
+    accountName: z.string().trim().max(160).default(""),
+    phone: z.string().trim().max(30).default(""),
+    email: z.union([z.string().trim().email(), z.literal("")]).default(""),
+    taxId: z.string().trim().max(20).default(""),
+    notes: z.string().trim().max(1_000).default(""),
+  })
+  .refine((row) => Boolean(row.phone || row.email), {
+    message: "Cada contacto debe incluir teléfono o correo.",
+    path: ["phone"],
+  });
+
+export const customerContactImportRequestSchema = z
+  .object({
+    fileName: z.string().trim().min(1).max(180),
+    synthetic: z.boolean().default(true),
+    consentConfirmed: z.boolean().default(false),
+    rows: z.array(customerContactImportRowSchema).min(1).max(2_000),
+  })
+  .refine((request) => request.synthetic || request.consentConfirmed, {
+    message: "Confirma la autorización antes de importar datos reales.",
+    path: ["consentConfirmed"],
+  });
+
+export const customerContactSchema = customerContactImportRowSchema.extend({
+  id: z.string().uuid(),
+  tenantId: z.string().min(3).max(80),
+  source: z.literal("spreadsheet"),
+  sourceFileName: z.string().min(1).max(180),
+  synthetic: z.boolean(),
+  consentStatus: z.enum(["confirmed", "not_applicable_synthetic"]),
+  outboundAllowed: z.literal(false),
+  createdBy: z.string().min(3).max(160),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+export type CustomerContact = z.infer<typeof customerContactSchema>;
+
 export const sessionSchema = z.object({
   user: userProfileSchema,
   memberships: z.array(

@@ -1,6 +1,7 @@
 import type {
   BusinessCase,
   CaseTransitionRequest,
+  CustomerContact,
   DemoWorkflow,
   EcIdentityValidation,
   FieldSparkPermission,
@@ -109,6 +110,40 @@ export async function updateMember(
     `/v1/tenants/${encodeURIComponent(tenantId)}/members/${encodeURIComponent(userId)}`,
     { method: "PATCH", body: JSON.stringify(input) },
   );
+}
+
+export async function loadCustomers(tenantId: string) {
+  return apiRequest<{ customers: CustomerContact[]; total: number }>(
+    `/v1/tenants/${encodeURIComponent(tenantId)}/customers`,
+  );
+}
+
+export async function importCustomers(
+  tenantId: string,
+  input: {
+    fileName: string;
+    synthetic: boolean;
+    consentConfirmed: boolean;
+    rows: Array<{
+      displayName: string;
+      accountName: string;
+      phone: string;
+      email: string;
+      taxId: string;
+      notes: string;
+    }>;
+  },
+) {
+  return apiRequest<{
+    imported: number;
+    duplicates: number;
+    total: number;
+    outboundAllowed: false;
+    customers: CustomerContact[];
+  }>(`/v1/tenants/${encodeURIComponent(tenantId)}/customers/import`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
 }
 
 export async function loadPlaybooks() {

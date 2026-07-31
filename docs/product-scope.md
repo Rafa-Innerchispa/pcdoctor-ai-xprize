@@ -25,6 +25,7 @@ The CRM-shaped screens are the control surface, not the product's intelligence.
 
 | Capability | AI responsibility | Human responsibility |
 |---|---|---|
+| Customer onboarding | normalize a reviewed CSV, TSV, or text contact list and flag incomplete or duplicate entries | choose whether to start empty; confirm consent before importing real contacts |
 | Intake | classify intent, urgency, service and gaps | correct unusual classifications |
 | Discovery | select questions from the tenant playbook | approve sensitive questions |
 | Continuity | detect stale opportunities and propose next action | approve outbound contact |

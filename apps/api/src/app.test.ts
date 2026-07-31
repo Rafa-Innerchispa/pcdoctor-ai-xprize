@@ -787,6 +787,85 @@ describe("FieldSpark API", () => {
     expect(forbiddenApproval.json().error).toBe("quote_approval_forbidden");
   });
 
+  it("imports tenant-isolated customer contacts with consent and duplicate guards", async () => {
+    const app = await buildApp({ NODE_ENV: "test" });
+    apps.push(app);
+    await app.inject({ method: "GET", url: "/v1/session" });
+
+    const imported = await app.inject({
+      method: "POST",
+      url: "/v1/tenants/iapro-ec/customers/import",
+      payload: {
+        fileName: "clientes-sinteticos.csv",
+        synthetic: true,
+        consentConfirmed: false,
+        rows: [
+          {
+            displayName: "Cliente sintético uno",
+            accountName: "Empresa sintética",
+            phone: "+593000000001",
+            email: "",
+            taxId: "",
+            notes: "Prueba controlada",
+          },
+          {
+            displayName: "Cliente sintético duplicado",
+            accountName: "Empresa sintética",
+            phone: "+593000000001",
+            email: "duplicado@example.invalid",
+            taxId: "",
+            notes: "Debe omitirse por teléfono",
+          },
+        ],
+      },
+    });
+    expect(imported.statusCode, imported.body).toBe(201);
+    expect(imported.json()).toMatchObject({
+      imported: 1,
+      duplicates: 1,
+      total: 1,
+      outboundAllowed: false,
+    });
+    expect(imported.json().customers[0]).toMatchObject({
+      tenantId: "iapro-ec",
+      synthetic: true,
+      consentStatus: "not_applicable_synthetic",
+      outboundAllowed: false,
+    });
+
+    const list = await app.inject({
+      method: "GET",
+      url: "/v1/tenants/iapro-ec/customers",
+    });
+    expect(list.statusCode).toBe(200);
+    expect(list.json().total).toBe(1);
+    const isolated = await app.inject({
+      method: "GET",
+      url: "/v1/tenants/pcdoctor-ec/customers",
+    });
+    expect(isolated.statusCode).toBe(200);
+    expect(isolated.json().total).toBe(0);
+
+    const missingConsent = await app.inject({
+      method: "POST",
+      url: "/v1/tenants/iapro-ec/customers/import",
+      payload: {
+        fileName: "clientes-reales.csv",
+        synthetic: false,
+        consentConfirmed: false,
+        rows: [
+          {
+            displayName: "Cliente no autorizado",
+            phone: "+593999999999",
+            email: "",
+          },
+        ],
+      },
+    });
+    expect(missingConsent.statusCode).toBe(400);
+    expect(missingConsent.json().error).toBe("invalid_customer_import");
+  });
+
   it("runs the guarded inspection, configurable VAT, quote and delivery-draft flow", async () => {
     const app = await buildApp({ NODE_ENV: "test" });
     apps.push(app);

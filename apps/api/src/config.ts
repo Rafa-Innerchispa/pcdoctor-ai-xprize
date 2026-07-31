@@ -8,7 +8,7 @@ const booleanString = z
 const configSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(8080),
-  WEB_ORIGIN: z.string().default("http://localhost:3000"),
+  WEB_ORIGIN: z.string().default("http://localhost:5173"),
   DEMO_MODE: z
     .enum(["true", "false"])
     .default("true")

@@ -68,6 +68,11 @@ Firestore is the first production operational store. Every collection document
 includes a tenant identifier. The current foundation implements the audit event
 store and a memory adapter for tests.
 
+The web onboarding flow can start with no imported data or can preview and
+submit a bounded CSV, TSV, or delimited text contact list. The API validates a
+maximum of 2,000 rows, deduplicates within the tenant, requires explicit consent
+for real contacts, and always creates them with outbound communication blocked.
+
 Recommended collections:
 
 - `tenants`
