@@ -12,7 +12,16 @@ import {
   invitationSchema,
   memberUpdateSchema,
   membershipSchema,
+  managedPropertyCreateSchema,
+  managedPropertySchema,
   profileUpdateSchema,
+  propertyCommitmentCreateSchema,
+  propertyCommitmentSchema,
+  propertyIssueCreateSchema,
+  propertyIssueSchema,
+  propertyPortfolioBriefSchema,
+  propertySystemCreateSchema,
+  propertySystemSchema,
   demoDraftUpdateSchema,
   demoWorkflowSchema,
   syntheticContacts,
@@ -24,7 +33,10 @@ import {
   type FieldSparkPermission,
   type SyntheticContact,
 } from "@fieldspark/contracts";
-import Fastify, { type FastifyRequest } from "fastify";
+import Fastify, {
+  type FastifyReply,
+  type FastifyRequest,
+} from "fastify";
 import {
   createAuthVerifier,
   type AuthenticatedIdentity,
@@ -55,6 +67,7 @@ import {
   membershipId,
 } from "./identity-service.js";
 import { createIdentityStore } from "./identity-store.js";
+import { createPortfolioStore } from "./portfolio-store.js";
 import { redactSensitiveText } from "./redact.js";
 import { createWorkflowStore } from "./workflow-store.js";
 
@@ -90,6 +103,7 @@ export async function buildApp(
   const caseStore = createCaseStore(config);
   const workflowStore = createWorkflowStore(config);
   const identityStore = createIdentityStore(config);
+  const portfolioStore = createPortfolioStore(config);
   const authVerifier =
     dependencies.authVerifier === undefined
       ? createAuthVerifier(config)
@@ -245,6 +259,14 @@ export async function buildApp(
     return typeof params[name] === "string" ? params[name] : "";
   }
 
+  function queryParam(request: FastifyRequest, name: string) {
+    const query =
+      typeof request.query === "object" && request.query
+        ? (request.query as Record<string, unknown>)
+        : {};
+    return typeof query[name] === "string" ? query[name] : "";
+  }
+
   async function tenantMembership(
     request: FastifyRequest,
     tenantId: string,
@@ -265,9 +287,371 @@ export async function buildApp(
     );
   }
 
+  function canAccessProperty(
+    membership: NonNullable<
+      Awaited<ReturnType<typeof findActiveMembership>>
+    >,
+    identity: AuthenticatedIdentity,
+    property: Awaited<ReturnType<typeof portfolioStore.getProperty>>,
+  ) {
+    if (!property) return false;
+    return (
+      membership.role === "platform_owner" ||
+      membership.role === "administrator" ||
+      property.administratorUserId === identity.uid ||
+      property.createdBy === identity.uid
+    );
+  }
+
+  async function appendPortfolioEvent(
+    request: FastifyRequest,
+    tenantId: string,
+    eventName:
+      | "managed_property_created"
+      | "property_system_created"
+      | "property_issue_created"
+      | "property_commitment_created",
+    action: string,
+    inputSummary: string,
+    result: string,
+  ) {
+    const identity = requireIdentity(request);
+    const event = auditEventSchema.parse({
+      timestamp: new Date().toISOString(),
+      eventId: randomUUID(),
+      eventName,
+      tenantId,
+      customerId: null,
+      caseId: null,
+      agentId: identity.uid,
+      actorType: "human",
+      action,
+      inputSummary,
+      decision: "Registrar y mantener la acción dentro del entorno autorizado.",
+      result,
+      model: null,
+      requestReference: request.id,
+      inputTokens: null,
+      outputTokens: null,
+      estimatedCostUsd: null,
+      humanApproval: "not_required",
+      durationMs: 0,
+      status: "completed",
+      error: null,
+      evidenceVersion: "1.0",
+    });
+    await eventStore.append(event);
+    request.log.info({ auditEvent: event }, "portfolio event completed");
+    return event;
+  }
+
   app.get("/v1/playbooks", async () => ({
     playbooks: Object.values(playbookDefinitions),
   }));
+
+  app.get("/v1/tenants/:tenantId/properties", async (request, reply) => {
+    const identity = requireIdentity(request);
+    const tenantId = routeParam(request, "tenantId");
+    const membership = await tenantMembership(request, tenantId);
+    if (!membership || !hasPermission(membership, "portfolio.view")) {
+      return reply.code(403).send({ error: "portfolio_view_forbidden" });
+    }
+    const properties = await portfolioStore.listProperties(tenantId);
+    return {
+      properties: properties.filter((property) =>
+        canAccessProperty(membership, identity, property),
+      ),
+    };
+  });
+
+  app.post("/v1/tenants/:tenantId/properties", async (request, reply) => {
+    const identity = requireIdentity(request);
+    const tenantId = routeParam(request, "tenantId");
+    const membership = await tenantMembership(request, tenantId);
+    if (!membership || !hasPermission(membership, "portfolio.manage")) {
+      return reply.code(403).send({ error: "portfolio_management_forbidden" });
+    }
+    const tenant = await identityStore.getTenant(tenantId);
+    if (!tenant) return reply.code(404).send({ error: "tenant_not_found" });
+    if (tenant.playbook !== "condominium_management") {
+      return reply.code(409).send({ error: "portfolio_playbook_required" });
+    }
+    const parsed = managedPropertyCreateSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: "invalid_managed_property",
+        details: parsed.error.flatten(),
+      });
+    }
+    const now = new Date().toISOString();
+    const property = managedPropertySchema.parse({
+      ...parsed.data,
+      id: randomUUID(),
+      tenantId,
+      status: "onboarding",
+      createdBy: identity.uid,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await portfolioStore.upsertProperty(property);
+    const event = await appendPortfolioEvent(
+      request,
+      tenantId,
+      "managed_property_created",
+      "create_managed_property",
+      property.name,
+      "Propiedad creada en incorporación, sin comunicaciones externas.",
+    );
+    return reply.code(201).send({ property, event });
+  });
+
+  async function resolvePropertyAccess(
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ) {
+    const identity = requireIdentity(request);
+    const tenantId = routeParam(request, "tenantId");
+    const membership = await tenantMembership(request, tenantId);
+    if (!membership || !hasPermission(membership, "portfolio.view")) {
+      reply.code(403).send({ error: "portfolio_view_forbidden" });
+      return null;
+    }
+    const property = await portfolioStore.getProperty(
+      routeParam(request, "propertyId"),
+    );
+    if (
+      !property ||
+      property.tenantId !== tenantId ||
+      !canAccessProperty(membership, identity, property)
+    ) {
+      reply.code(404).send({ error: "managed_property_not_found" });
+      return null;
+    }
+    return { identity, tenantId, membership, property };
+  }
+
+  app.get(
+    "/v1/tenants/:tenantId/properties/:propertyId",
+    async (request, reply) => {
+      const access = await resolvePropertyAccess(request, reply);
+      if (!access) return;
+      const [systems, issues, commitments] = await Promise.all([
+        portfolioStore.listSystems(access.tenantId, access.property.id),
+        portfolioStore.listIssues(access.tenantId, access.property.id),
+        portfolioStore.listCommitments(access.tenantId, access.property.id),
+      ]);
+      return { property: access.property, systems, issues, commitments };
+    },
+  );
+
+  app.post(
+    "/v1/tenants/:tenantId/properties/:propertyId/systems",
+    async (request, reply) => {
+      const access = await resolvePropertyAccess(request, reply);
+      if (!access) return;
+      if (!hasPermission(access.membership, "portfolio.manage")) {
+        return reply
+          .code(403)
+          .send({ error: "portfolio_management_forbidden" });
+      }
+      const parsed = propertySystemCreateSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: "invalid_property_system",
+          details: parsed.error.flatten(),
+        });
+      }
+      const now = new Date().toISOString();
+      const system = propertySystemSchema.parse({
+        ...parsed.data,
+        id: randomUUID(),
+        tenantId: access.tenantId,
+        propertyId: access.property.id,
+        createdBy: access.identity.uid,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await portfolioStore.upsertSystem(system);
+      const event = await appendPortfolioEvent(
+        request,
+        access.tenantId,
+        "property_system_created",
+        "create_property_system",
+        `${access.property.name}: ${system.name}`,
+        "Sistema incorporado al inventario operativo.",
+      );
+      return reply.code(201).send({ system, event });
+    },
+  );
+
+  app.post(
+    "/v1/tenants/:tenantId/properties/:propertyId/issues",
+    async (request, reply) => {
+      const access = await resolvePropertyAccess(request, reply);
+      if (!access) return;
+      if (!hasPermission(access.membership, "portfolio.manage")) {
+        return reply
+          .code(403)
+          .send({ error: "portfolio_management_forbidden" });
+      }
+      const parsed = propertyIssueCreateSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: "invalid_property_issue",
+          details: parsed.error.flatten(),
+        });
+      }
+      const now = new Date().toISOString();
+      const issue = propertyIssueSchema.parse({
+        ...parsed.data,
+        id: randomUUID(),
+        tenantId: access.tenantId,
+        propertyId: access.property.id,
+        status: "reported",
+        createdBy: access.identity.uid,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await portfolioStore.upsertIssue(issue);
+      const event = await appendPortfolioEvent(
+        request,
+        access.tenantId,
+        "property_issue_created",
+        "create_property_issue",
+        `${access.property.name}: ${issue.title}`,
+        "Novedad registrada y pendiente de clasificación operativa.",
+      );
+      return reply.code(201).send({ issue, event });
+    },
+  );
+
+  app.post(
+    "/v1/tenants/:tenantId/portfolio/commitments",
+    async (request, reply) => {
+      const identity = requireIdentity(request);
+      const tenantId = routeParam(request, "tenantId");
+      const membership = await tenantMembership(request, tenantId);
+      if (!membership || !hasPermission(membership, "portfolio.manage")) {
+        return reply
+          .code(403)
+          .send({ error: "portfolio_management_forbidden" });
+      }
+      const parsed = propertyCommitmentCreateSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: "invalid_property_commitment",
+          details: parsed.error.flatten(),
+        });
+      }
+      if (parsed.data.propertyId) {
+        const property = await portfolioStore.getProperty(
+          parsed.data.propertyId,
+        );
+        if (
+          !property ||
+          property.tenantId !== tenantId ||
+          !canAccessProperty(membership, identity, property)
+        ) {
+          return reply
+            .code(404)
+            .send({ error: "managed_property_not_found" });
+        }
+      }
+      const now = new Date().toISOString();
+      const commitment = propertyCommitmentSchema.parse({
+        ...parsed.data,
+        id: randomUUID(),
+        tenantId,
+        status: "scheduled",
+        createdBy: identity.uid,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await portfolioStore.upsertCommitment(commitment);
+      const event = await appendPortfolioEvent(
+        request,
+        tenantId,
+        "property_commitment_created",
+        "create_property_commitment",
+        commitment.title,
+        "Compromiso registrado sin enviar notificaciones externas.",
+      );
+      return reply.code(201).send({ commitment, event });
+    },
+  );
+
+  app.get(
+    "/v1/tenants/:tenantId/portfolio/brief",
+    async (request, reply) => {
+      const identity = requireIdentity(request);
+      const tenantId = routeParam(request, "tenantId");
+      const membership = await tenantMembership(request, tenantId);
+      if (!membership || !hasPermission(membership, "portfolio.view")) {
+        return reply.code(403).send({ error: "portfolio_view_forbidden" });
+      }
+      const requestedPropertyId = queryParam(request, "propertyId");
+      const allProperties = await portfolioStore.listProperties(tenantId);
+      const visibleProperties = allProperties.filter((property) =>
+        canAccessProperty(membership, identity, property),
+      );
+      const property = requestedPropertyId
+        ? visibleProperties.find((value) => value.id === requestedPropertyId)
+        : null;
+      if (requestedPropertyId && !property) {
+        return reply
+          .code(404)
+          .send({ error: "managed_property_not_found" });
+      }
+      const visibleIds = new Set(visibleProperties.map((value) => value.id));
+      const [allSystems, allIssues, allCommitments] = await Promise.all([
+        portfolioStore.listSystems(tenantId, property?.id),
+        portfolioStore.listIssues(tenantId, property?.id),
+        portfolioStore.listCommitments(tenantId, property?.id),
+      ]);
+      const systems = allSystems.filter((value) =>
+        visibleIds.has(value.propertyId),
+      );
+      const issues = allIssues.filter((value) =>
+        visibleIds.has(value.propertyId),
+      );
+      const commitments = allCommitments.filter(
+        (value) =>
+          value.propertyId === null || visibleIds.has(value.propertyId),
+      );
+      const now = Date.now();
+      const brief = propertyPortfolioBriefSchema.parse({
+        generatedAt: new Date(now).toISOString(),
+        tenantId,
+        property: property ?? null,
+        properties: property ? [property] : visibleProperties,
+        totals: {
+          properties: property ? 1 : visibleProperties.length,
+          openIssues: issues.filter((value) => value.status !== "closed").length,
+          criticalIssues: issues.filter(
+            (value) =>
+              value.status !== "closed" && value.priority === "critical",
+          ).length,
+          systemsRequiringAttention: systems.filter((value) =>
+            ["attention", "critical"].includes(value.condition),
+          ).length,
+          upcomingCommitments: commitments.filter((value) => {
+            const nextDate = value.startsAt ?? value.dueAt;
+            return (
+              value.status === "scheduled" &&
+              Boolean(nextDate) &&
+              new Date(nextDate!).getTime() >= now
+            );
+          }).length,
+        },
+        issues,
+        systems,
+        commitments,
+        grounded: true,
+        outboundAllowed: false,
+      });
+      return { brief };
+    },
+  );
 
   app.post("/v1/identity/validate", async (request, reply) => {
     const parsed = ecIdentityValidationRequestSchema.safeParse(request.body);

@@ -14,6 +14,7 @@ import {
 } from "./api";
 import { useFieldSparkAuth } from "./auth-context";
 import { CasesPanel } from "./components/cases-panel";
+import { PortfolioPanel } from "./components/portfolio-panel";
 
 const roleLabels: Record<FieldSparkRole, string> = {
   platform_owner: "Propietario",
@@ -43,6 +44,8 @@ const permissionLabels: Record<FieldSparkPermission, string> = {
   "reports.view": "Ver reportes",
   "audit.view": "Ver auditoría",
   "integrations.manage": "Administrar integraciones",
+  "portfolio.view": "Ver comunidades y edificios",
+  "portfolio.manage": "Gestionar comunidades y edificios",
 };
 
 const navByRole: Record<FieldSparkRole, string[]> = {
@@ -81,6 +84,14 @@ const navByRole: Record<FieldSparkRole, string[]> = {
     "Consultas",
   ],
 };
+
+function navigationFor(role: FieldSparkRole, playbook: string) {
+  const base = navByRole[role];
+  if (playbook !== "condominium_management" || role === "customer") {
+    return base;
+  }
+  return [base[0]!, "Portafolio", ...base.slice(1)];
+}
 
 function Brand() {
   return (
@@ -606,8 +617,12 @@ function TenantDashboard() {
   const current = (
     session!.memberships[membershipIndex] ?? session!.memberships[0]
   )!;
+  const navigation = navigationFor(
+    current.membership.role,
+    current.tenant.playbook,
+  );
   const [active, setActive] = useState(
-    navByRole[current.membership.role][0]!,
+    navigation[0]!,
   );
   const initials = (session!.user.displayName || session!.user.email)
     .split(/\s+/)
@@ -617,7 +632,7 @@ function TenantDashboard() {
     .toUpperCase();
 
   useEffect(() => {
-    setActive(navByRole[current.membership.role][0]!);
+    setActive(navigation[0]!);
   }, [membershipIndex]);
 
   return (
@@ -646,7 +661,7 @@ function TenantDashboard() {
           </div>
         )}
         <nav className="product-nav">
-          {navByRole[current.membership.role].map((item, index) => (
+          {navigation.map((item, index) => (
             <button
               key={item}
               className={active === item ? "active" : ""}
@@ -682,6 +697,11 @@ function TenantDashboard() {
         <div className="product-content">
           {active === "Resumen" ? (
             <OverviewPanel role={current.membership.role} />
+          ) : active === "Portafolio" ? (
+            <PortfolioPanel
+              tenantId={current.tenant.id}
+              actor={current.membership}
+            />
           ) : active === "Expedientes" || active === "Mis expedientes" ? (
             <CasesPanel
               tenant={current.tenant}

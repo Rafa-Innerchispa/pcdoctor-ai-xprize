@@ -34,6 +34,10 @@ export const eventNames = [
   "member_permissions_updated",
   "identity_validation_completed",
   "workflow_transition_completed",
+  "managed_property_created",
+  "property_system_created",
+  "property_issue_created",
+  "property_commitment_created",
 ] as const;
 
 export const actorTypes = ["agent", "human", "system", "customer"] as const;
@@ -150,6 +154,8 @@ export const fieldSparkPermissions = [
   "reports.view",
   "audit.view",
   "integrations.manage",
+  "portfolio.view",
+  "portfolio.manage",
 ] as const;
 
 export const fieldSparkRoleSchema = z.enum(fieldSparkRoles);
@@ -178,6 +184,8 @@ export const defaultPermissionsByRole: Record<
     "billing.prepare",
     "messages.prepare",
     "reports.view",
+    "portfolio.view",
+    "portfolio.manage",
   ],
   customer: [
     "cases.view",
@@ -191,6 +199,7 @@ export const tenantPlaybooks = [
   "pcdoctor",
   "iapro",
   "photography_studio",
+  "condominium_management",
 ] as const;
 
 export const tenantSchema = z.object({
@@ -423,4 +432,225 @@ export const playbookDefinitionSchema = z.object({
 
 export type PlaybookDefinition = z.infer<
   typeof playbookDefinitionSchema
+>;
+
+export const managedPropertyTypes = [
+  "condominium",
+  "urbanization",
+  "residential_building",
+  "mixed_use",
+  "commercial_complex",
+] as const;
+
+export const managedPropertyStatuses = [
+  "onboarding",
+  "active",
+  "suspended",
+] as const;
+
+export const managedPropertySchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().min(3).max(80),
+  name: z.string().min(2).max(160),
+  propertyType: z.enum(managedPropertyTypes),
+  status: z.enum(managedPropertyStatuses),
+  city: z.string().min(2).max(100),
+  address: z.string().min(2).max(240),
+  unitCount: z.number().int().nonnegative().nullable(),
+  administratorName: z.string().max(160),
+  administratorUserId: z.string().max(160).nullable(),
+  synthetic: z.boolean(),
+  createdBy: z.string().min(3).max(160),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+export type ManagedProperty = z.infer<typeof managedPropertySchema>;
+
+export const managedPropertyCreateSchema = z.object({
+  name: z.string().trim().min(2).max(160),
+  propertyType: z.enum(managedPropertyTypes),
+  city: z.string().trim().min(2).max(100),
+  address: z.string().trim().min(2).max(240),
+  unitCount: z.number().int().nonnegative().nullable().default(null),
+  administratorName: z.string().trim().max(160).default(""),
+  administratorUserId: z.string().trim().min(3).max(160).nullable().default(null),
+  synthetic: z.boolean().default(false),
+});
+
+export const propertySystemTypes = [
+  "electric_fence",
+  "fire_detection",
+  "fire_suppression",
+  "cctv",
+  "access_control",
+  "alarms",
+  "elevators",
+  "pumps",
+  "generator",
+  "water",
+  "lighting",
+  "gas",
+  "gates",
+  "intercom",
+  "playground",
+  "pool",
+  "other",
+] as const;
+
+export const propertySystemConditions = [
+  "unknown",
+  "operational",
+  "attention",
+  "critical",
+] as const;
+
+export const propertySystemSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().min(3).max(80),
+  propertyId: z.string().uuid(),
+  systemType: z.enum(propertySystemTypes),
+  name: z.string().min(2).max(160),
+  condition: z.enum(propertySystemConditions),
+  inventoryCount: z.number().int().nonnegative(),
+  lastInspectionAt: z.string().datetime().nullable(),
+  nextInspectionAt: z.string().datetime().nullable(),
+  notes: z.string().max(2_000),
+  synthetic: z.boolean(),
+  createdBy: z.string().min(3).max(160),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+export type PropertySystem = z.infer<typeof propertySystemSchema>;
+
+export const propertySystemCreateSchema = z.object({
+  systemType: z.enum(propertySystemTypes),
+  name: z.string().trim().min(2).max(160),
+  condition: z.enum(propertySystemConditions).default("unknown"),
+  inventoryCount: z.number().int().nonnegative().default(1),
+  lastInspectionAt: z.string().datetime().nullable().default(null),
+  nextInspectionAt: z.string().datetime().nullable().default(null),
+  notes: z.string().trim().max(2_000).default(""),
+  synthetic: z.boolean().default(false),
+});
+
+export const propertyIssueCategories = [
+  "security",
+  "fire_safety",
+  "coexistence",
+  "maintenance",
+  "infrastructure",
+  "utilities",
+  "finance",
+  "collections",
+  "legal",
+  "governance",
+  "communication",
+  "staff",
+  "supplier",
+  "emergency",
+  "other",
+] as const;
+
+export const propertyIssueSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().min(3).max(80),
+  propertyId: z.string().uuid(),
+  category: z.enum(propertyIssueCategories),
+  title: z.string().min(3).max(180),
+  description: z.string().min(3).max(8_000),
+  priority: z.enum(["low", "medium", "high", "critical"]),
+  status: z.enum(["reported", "triaged", "in_progress", "waiting", "closed"]),
+  source: z.enum(["manual", "audio", "email", "whatsapp", "meeting", "system"]),
+  assignedTo: z.string().max(160).nullable(),
+  dueAt: z.string().datetime().nullable(),
+  synthetic: z.boolean(),
+  createdBy: z.string().min(3).max(160),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+export type PropertyIssue = z.infer<typeof propertyIssueSchema>;
+
+export const propertyIssueCreateSchema = z.object({
+  category: z.enum(propertyIssueCategories),
+  title: z.string().trim().min(3).max(180),
+  description: z.string().trim().min(3).max(8_000),
+  priority: z.enum(["low", "medium", "high", "critical"]).default("medium"),
+  source: z
+    .enum(["manual", "audio", "email", "whatsapp", "meeting", "system"])
+    .default("manual"),
+  assignedTo: z.string().trim().min(3).max(160).nullable().default(null),
+  dueAt: z.string().datetime().nullable().default(null),
+  synthetic: z.boolean().default(false),
+});
+
+export const propertyCommitmentSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().min(3).max(80),
+  propertyId: z.string().uuid().nullable(),
+  commitmentType: z.enum([
+    "meeting",
+    "task",
+    "deadline",
+    "assembly",
+    "inspection",
+    "payment",
+  ]),
+  title: z.string().min(3).max(180),
+  startsAt: z.string().datetime().nullable(),
+  dueAt: z.string().datetime().nullable(),
+  reminderAt: z.string().datetime().nullable(),
+  ownerUserId: z.string().max(160).nullable(),
+  status: z.enum(["scheduled", "done", "cancelled"]),
+  notes: z.string().max(2_000),
+  synthetic: z.boolean(),
+  createdBy: z.string().min(3).max(160),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+export type PropertyCommitment = z.infer<typeof propertyCommitmentSchema>;
+
+export const propertyCommitmentCreateSchema = z.object({
+  propertyId: z.string().uuid().nullable().default(null),
+  commitmentType: z.enum([
+    "meeting",
+    "task",
+    "deadline",
+    "assembly",
+    "inspection",
+    "payment",
+  ]),
+  title: z.string().trim().min(3).max(180),
+  startsAt: z.string().datetime().nullable().default(null),
+  dueAt: z.string().datetime().nullable().default(null),
+  reminderAt: z.string().datetime().nullable().default(null),
+  ownerUserId: z.string().trim().min(3).max(160).nullable().default(null),
+  notes: z.string().trim().max(2_000).default(""),
+  synthetic: z.boolean().default(false),
+});
+
+export const propertyPortfolioBriefSchema = z.object({
+  generatedAt: z.string().datetime(),
+  tenantId: z.string().min(3).max(80),
+  property: managedPropertySchema.nullable(),
+  properties: z.array(managedPropertySchema),
+  totals: z.object({
+    properties: z.number().int().nonnegative(),
+    openIssues: z.number().int().nonnegative(),
+    criticalIssues: z.number().int().nonnegative(),
+    systemsRequiringAttention: z.number().int().nonnegative(),
+    upcomingCommitments: z.number().int().nonnegative(),
+  }),
+  issues: z.array(propertyIssueSchema),
+  systems: z.array(propertySystemSchema),
+  commitments: z.array(propertyCommitmentSchema),
+  grounded: z.literal(true),
+  outboundAllowed: z.literal(false),
+});
+
+export type PropertyPortfolioBrief = z.infer<
+  typeof propertyPortfolioBriefSchema
 >;

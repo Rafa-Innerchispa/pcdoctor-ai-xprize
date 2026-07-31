@@ -71,6 +71,10 @@ Recommended collections:
 - `campaigns`
 - `playbooks`
 - `auditEvents`
+- `managedProperties`
+- `propertySystems`
+- `propertyIssues`
+- `propertyCommitments`
 
 ### WhatsApp
 
