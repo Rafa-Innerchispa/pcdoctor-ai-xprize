@@ -29,6 +29,8 @@ FieldSpark adds a tenant-isolated inspection-to-quote vertical slice:
   Storage evidence vault is connected; structured records persist in the
   selected operational store;
 - monthly inspection and per-inspection media limits are visible and enforced.
+- staging allows at most 2,048 output tokens for the bounded structured
+  inspection result; the prepaid project cap remains the hard financial guard.
 
 ## Consequences
 
@@ -39,4 +41,3 @@ FieldSpark adds a tenant-isolated inspection-to-quote vertical slice:
   cost benchmark.
 - Reports are printable HTML/PDF layouts; a server-generated immutable PDF and
   electronic signature remain later hardening work.
-
